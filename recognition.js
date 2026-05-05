@@ -196,6 +196,9 @@ class Template {
 }
 
 export class RecognitionEngine {
+    // Acceptance distance in normalized [0,1]^2 cloud space. See identifyRune.
+    static MATCH_THRESHOLD = 0.85;
+
     constructor() {
         this.templates = RAW_TEMPLATES.map(t => new Template(t.name, t.strokes));
     }
@@ -226,8 +229,10 @@ export class RecognitionEngine {
             }
         }
 
-        // Distance threshold for a valid match (lower is better, max distance is around 1.4 for 1x1 box)
-        if (bestDistance > 0.45) return null;
+        // Distance threshold for a valid match (lower is better, max distance is around 1.4 for 1x1 box).
+        // Empirically, freehand drawings of multi-stroke runes (Tiwaz, Algiz, Gebo) routinely
+        // produce distances in the 0.5–0.8 range; 0.45 was too strict and rejected most real input.
+        if (bestDistance > RecognitionEngine.MATCH_THRESHOLD) return null;
 
         console.log(`[P$ Recognizer] Matched: ${bestMatch.name} with dist: ${bestDistance.toFixed(3)}`);
         return bestMatch.name;
@@ -267,7 +272,7 @@ export class RecognitionEngine {
         if (avgSpeed > 1.5) dynamics = '거침(폭발적)';
         else if (avgSpeed < 0.3) dynamics = '느림(응축)';
 
-        // Radical Extraction Algorithm
+        // Compute the overall bounding box (used for radical-extraction fallback below).
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         runeStrokes.forEach(stroke => {
             stroke.forEach(pt => {
@@ -278,48 +283,62 @@ export class RecognitionEngine {
             });
         });
         const overallSize = Math.max(maxX - minX, maxY - minY);
-        
-        let mainStrokes = [];
-        let radicalModifiers = [];
-        let radicalCount = 0;
-
-        runeStrokes.forEach(stroke => {
-            let sMinX = Infinity, sMinY = Infinity, sMaxX = -Infinity, sMaxY = -Infinity;
-            stroke.forEach(pt => {
-                sMinX = Math.min(sMinX, pt.x);
-                sMinY = Math.min(sMinY, pt.y);
-                sMaxX = Math.max(sMaxX, pt.x);
-                sMaxY = Math.max(sMaxY, pt.y);
-            });
-            const w = sMaxX - sMinX;
-            const h = sMaxY - sMinY;
-            const size = Math.max(w, h);
-            
-            // If the stroke is very small compared to the overall rune, it's a radical
-            if (size < overallSize * 0.20 && overallSize > 50) {
-                radicalCount++;
-                if (w < 15 && h < 15) {
-                    radicalModifiers.push('[응축된]'); // Dot
-                } else if (w > h * 2) {
-                    radicalModifiers.push('[차단된]'); // Horizontal Bar
-                } else if (h > w * 2) {
-                    radicalModifiers.push('[탈취의]'); // Vertical Hook
-                } else {
-                    radicalModifiers.push('[변이된]'); // Generic wave/curve
-                }
-            } else {
-                mainStrokes.push(stroke);
-            }
-        });
 
         let finalMeaning = '알 수 없는 문양';
         let instabilityBonus = 20;
+        let radicalModifiers = [];
+        let radicalCount = 0;
 
-        // Identify the main shape
-        const matchedRune = this.identifyRune(mainStrokes.length > 0 ? mainStrokes : runeStrokes);
+        // Pass 1: try matching ALL strokes as one rune. Multi-stroke runes like Tiwaz/Algiz
+        // have inherent size variation (long stem + shorter twigs). The previous logic stripped
+        // the twigs as 'radicals' before matching, leaving only the stem and turning Tiwaz into
+        // [변이된]×2 이사(|). Try a holistic match first so well-drawn runes are recognized as-is.
+        let matchedRune = this.identifyRune(runeStrokes);
+
+        // Pass 2: only if the holistic match failed, treat clearly-small strokes as radicals
+        // and rematch the remaining "main" strokes. This preserves the README's radical-combination
+        // intent (열기△ + 대지ㅡ → 마그마) without breaking standalone multi-stroke runes.
+        if (!matchedRune) {
+            const mainStrokes = [];
+            runeStrokes.forEach(stroke => {
+                let sMinX = Infinity, sMinY = Infinity, sMaxX = -Infinity, sMaxY = -Infinity;
+                stroke.forEach(pt => {
+                    sMinX = Math.min(sMinX, pt.x);
+                    sMinY = Math.min(sMinY, pt.y);
+                    sMaxX = Math.max(sMaxX, pt.x);
+                    sMaxY = Math.max(sMaxY, pt.y);
+                });
+                const w = sMaxX - sMinX;
+                const h = sMaxY - sMinY;
+                const size = Math.max(w, h);
+
+                // Only strip truly small strokes (< 15% of overall bbox, and the rune itself is
+                // big enough to make "small" meaningful). The old 20% cutoff was eating Tiwaz twigs
+                // (which sit right at ~15% of the rune's bbox).
+                if (size < overallSize * 0.15 && overallSize > 50) {
+                    radicalCount++;
+                    if (w < 15 && h < 15) {
+                        radicalModifiers.push('[응축된]'); // Dot
+                    } else if (w > h * 2) {
+                        radicalModifiers.push('[차단된]'); // Horizontal Bar
+                    } else if (h > w * 2) {
+                        radicalModifiers.push('[탈취의]'); // Vertical Hook
+                    } else {
+                        radicalModifiers.push('[변이된]'); // Generic wave/curve
+                    }
+                } else {
+                    mainStrokes.push(stroke);
+                }
+            });
+
+            if (mainStrokes.length > 0 && mainStrokes.length < runeStrokes.length) {
+                matchedRune = this.identifyRune(mainStrokes);
+            }
+        }
+
         if (matchedRune) {
             finalMeaning = matchedRune;
-            instabilityBonus = 0; 
+            instabilityBonus = 0;
         }
 
         // Apply Radicals
