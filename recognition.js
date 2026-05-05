@@ -51,6 +51,19 @@ const RAW_TEMPLATES = [
         strokes: [
             [{x: 0, y: 50}, {x: 100, y: 50}]
         ]
+    },
+    {
+        name: '원(○)', // Sowilo/Sun: closed circle (drawn with compass)
+        strokes: (() => {
+            const seg = 32;
+            const cx = 50, cy = 50, r = 50;
+            const pts = [];
+            for (let i = 0; i <= seg; i++) {
+                const theta = (i / seg) * Math.PI * 2;
+                pts.push({ x: cx + r * Math.cos(theta), y: cy + r * Math.sin(theta) });
+            }
+            return [pts];
+        })()
     }
 ];
 

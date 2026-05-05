@@ -200,11 +200,22 @@ function draw(e) {
       mode: state.mode
     });
   } else if (state.assistMode === 'ruler') {
-    // Only two points: start and current
-    state.currentStroke = [
-      { x: drawStartPt.x, y: drawStartPt.y, t: drawStartPt.t, mode: state.mode },
-      { x: offsetX, y: offsetY, t: now, mode: state.mode }
-    ];
+    // Densify the straight line so the $P recognizer has enough samples.
+    // Two raw points fail the `points.length < 5` early-return inside
+    // identifyRune (and even with multiple ruler strokes, sparse points
+    // produce poor resample/Scale results).
+    const segments = 32;
+    const linePoints = [];
+    for (let i = 0; i <= segments; i++) {
+      const a = i / segments;
+      linePoints.push({
+        x: drawStartPt.x + (offsetX - drawStartPt.x) * a,
+        y: drawStartPt.y + (offsetY - drawStartPt.y) * a,
+        t: i === 0 ? drawStartPt.t : now,
+        mode: state.mode
+      });
+    }
+    state.currentStroke = linePoints;
   } else if (state.assistMode === 'compass') {
     // Generate perfect circle
     const r = Math.hypot(offsetX - drawStartPt.x, offsetY - drawStartPt.y);
