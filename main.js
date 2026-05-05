@@ -31,6 +31,7 @@ const graphCtx = graphCanvas.getContext('2d');
 const btnDrawBone = document.getElementById('btn-draw-bone');
 const btnDrawRune = document.getElementById('btn-draw-rune');
 const btnClear = document.getElementById('btn-clear');
+const btnUndo = document.getElementById('btn-undo');
 
 const valResonance = document.getElementById('val-resonance');
 const valHeat = document.getElementById('val-heat');
@@ -147,6 +148,17 @@ function init() {
   btnDrawBone.addEventListener('click', () => setMode('bone'));
   btnDrawRune.addEventListener('click', () => setMode('rune'));
   btnClear.addEventListener('click', clearCanvas);
+  btnUndo.addEventListener('click', undoLastStroke);
+  window.addEventListener('keydown', (e) => {
+    // Ctrl+Z (and Cmd+Z on macOS) → undo last stroke. Ignore when typing
+    // in form fields so the material <select> keeps its native behavior.
+    const target = e.target;
+    const inForm = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT');
+    if (!inForm && (e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      undoLastStroke();
+    }
+  });
   
   btnAssistFree.addEventListener('click', () => setAssistMode('free'));
   btnAssistRuler.addEventListener('click', () => setAssistMode('ruler'));
@@ -229,6 +241,31 @@ function clearCanvas() {
   state.heat = 0;
   state.instability = 0;
   updateAnalyzerUI();
+}
+
+// Pop the most recent completed stroke and re-run the analyzer. We rebuild
+// resonance/heat/instability from the remaining strokes via analyzeCurrentState
+// rather than tracking deltas — that way Undo always shows the exact state the
+// canvas would have had if the last stroke were never drawn.
+function undoLastStroke() {
+  if (state.isDrawing) return; // mid-stroke: ignore so we don't desync
+  if (state.strokes.length === 0) return;
+  state.strokes.pop();
+  if (state.strokes.length === 0) {
+    // Reset transient analyzer values when nothing remains
+    state.resonance = 0;
+    state.heat = 0;
+    state.instability = 0;
+    state.overloaded = false;
+    state.currentMeaning = '';
+    state.currentDynamics = '';
+    systemStatus.innerText = '대기 중...';
+    systemStatus.style.color = '#fff';
+    btnCastMagic.style.display = 'none';
+    updateAnalyzerUI();
+    return;
+  }
+  analyzeCurrentState();
 }
 
 // Drawing Logic
@@ -451,10 +488,11 @@ function analyzeCurrentState() {
   
   state.instability = Math.max(Math.min(baseInstability + analysis.instabilityModifier, 100), 0);
 
-  // Overload Check
-  if (state.heat > maxHeat || state.instability >= 100) {
-     state.overloaded = true;
-  }
+  // Overload reflects whether the current stroke set exceeds limits. Recompute
+  // every analysis so removing a stroke (Undo) or pure clear can take the canvas
+  // out of overload without an explicit reset, and so the OVERLOAD overlay can't
+  // be left stuck on top of a perfectly safe heat/instability reading.
+  state.overloaded = state.heat > maxHeat || state.instability >= 100;
 
   state.currentMeaning = analysis.meaning;
   state.currentDynamics = analysis.dynamics;
