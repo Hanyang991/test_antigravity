@@ -161,6 +161,19 @@ function Resample(points, n) {
     return newpoints;
 }
 
+// Anisotropic scale to [0,1]^2 with a degenerate-axis fallback.
+//
+// The original $P uses uniform scale (max(width, height)). That made the
+// recognizer aspect-ratio-sensitive: a stretched H or M would no longer
+// match its 1:1 template. We use anisotropic scale (independent x/y
+// normalization) so a 240×160 H still matches the 100×100 template.
+//
+// Single-line runes (이사 = pure vertical, 대지 = pure horizontal) and
+// near-degenerate strokes have one axis ≈ 0, so a pure anisotropic scale
+// would either divide by zero or amplify noise on that axis to a full unit
+// span. When one axis is much smaller than the other (< 10% of the larger),
+// fall back to uniform scale so single-line shapes keep their distinctive
+// 1D footprint inside the unit box.
 function Scale(points) {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (let i = 0; i < points.length; i++) {
@@ -169,13 +182,24 @@ function Scale(points) {
         maxX = Math.max(maxX, points[i].x);
         maxY = Math.max(maxY, points[i].y);
     }
-    const size = Math.max(maxX - minX, maxY - minY);
-    if (size === 0) return points; // Cannot scale a single point
-    
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const maxSize = Math.max(width, height);
+    if (maxSize === 0) return points;
+
+    const minRatio = 0.1;
+    let scaleX, scaleY;
+    if (width < maxSize * minRatio || height < maxSize * minRatio) {
+        scaleX = scaleY = maxSize;
+    } else {
+        scaleX = width;
+        scaleY = height;
+    }
+
     let newpoints = [];
     for (let i = 0; i < points.length; i++) {
-        let qx = (points[i].x - minX) / size;
-        let qy = (points[i].y - minY) / size;
+        let qx = (points[i].x - minX) / scaleX;
+        let qy = (points[i].y - minY) / scaleY;
         newpoints.push(new Point(qx, qy, points[i].id));
     }
     return newpoints;
@@ -252,7 +276,12 @@ class Template {
 
 export class RecognitionEngine {
     // Acceptance distance in normalized [0,1]^2 cloud space. See identifyRune.
-    static MATCH_THRESHOLD = 0.85;
+    // Anisotropic Scale lets stretched H/M/◇ match their templates, but tightens
+    // some sub-feature proportions (e.g. Tiwaz twig depth relative to stem),
+    // pushing some canonical drawings up to ~0.85. Random scribble distances
+    // sit around 1.5+, so 0.95 keeps a comfortable margin while admitting
+    // moderately stretched shapes.
+    static MATCH_THRESHOLD = 0.95;
 
     constructor() {
         this.templates = RAW_TEMPLATES.map(t => new Template(t.name, t.strokes));
