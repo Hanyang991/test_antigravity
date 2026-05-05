@@ -51,6 +51,74 @@ const RAW_TEMPLATES = [
         strokes: [
             [{x: 0, y: 50}, {x: 100, y: 50}]
         ]
+    },
+    {
+        name: '원(○)', // Sowilo/Sun: closed circle (drawn with compass)
+        strokes: (() => {
+            const seg = 32;
+            const cx = 50, cy = 50, r = 50;
+            const pts = [];
+            for (let i = 0; i <= seg; i++) {
+                const theta = (i / seg) * Math.PI * 2;
+                pts.push({ x: cx + r * Math.cos(theta), y: cy + r * Math.sin(theta) });
+            }
+            return [pts];
+        })()
+    },
+    {
+        name: '케나즈(<)', // Kenaz: open angle pointing right (torch)
+        strokes: [
+            [{x: 100, y: 0},  {x: 0, y: 50}],
+            [{x: 0,   y: 50}, {x: 100, y: 100}]
+        ]
+    },
+    {
+        name: '하갈라즈(H)', // Hagalaz: H shape (hail)
+        strokes: [
+            [{x: 0,   y: 0}, {x: 0,   y: 100}], // left vertical
+            [{x: 100, y: 0}, {x: 100, y: 100}], // right vertical
+            [{x: 0,  y: 50}, {x: 100, y: 50}]   // crossbar
+        ]
+    },
+    {
+        name: '에와즈(M)', // Ehwaz: M shape (horse / passage)
+        strokes: [
+            [{x: 0,   y: 100}, {x: 0,   y: 0}],   // left vertical (up)
+            [{x: 0,   y: 0},   {x: 50,  y: 100}], // down to middle valley
+            [{x: 50,  y: 100}, {x: 100, y: 0}],   // up to right peak
+            [{x: 100, y: 0},   {x: 100, y: 100}]  // right vertical (down)
+        ]
+    },
+    {
+        name: '열기(△)', // Heat / fire (open triangle radical from README)
+        strokes: [
+            [{x: 50,  y: 0},   {x: 0,   y: 100}],
+            [{x: 0,   y: 100}, {x: 100, y: 100}],
+            [{x: 100, y: 100}, {x: 50,  y: 0}]
+        ]
+    },
+    {
+        name: '다가즈(◇)', // Dagaz: diamond (day / dawn)
+        strokes: [
+            [{x: 50,  y: 0},   {x: 100, y: 50}],
+            [{x: 100, y: 50},  {x: 50,  y: 100}],
+            [{x: 50,  y: 100}, {x: 0,   y: 50}],
+            [{x: 0,   y: 50},  {x: 50,  y: 0}]
+        ]
+    },
+    {
+        name: '나우디즈(+)', // Naudhiz: cross / need
+        strokes: [
+            [{x: 50, y: 0}, {x: 50, y: 100}],
+            [{x: 0, y: 50}, {x: 100, y: 50}]
+        ]
+    },
+    {
+        name: '라구즈(L)', // Laguz: L shape (water / flow)
+        strokes: [
+            [{x: 0, y: 0},   {x: 0,   y: 100}],
+            [{x: 0, y: 100}, {x: 100, y: 100}]
+        ]
     }
 ];
 
@@ -93,6 +161,19 @@ function Resample(points, n) {
     return newpoints;
 }
 
+// Anisotropic scale to [0,1]^2 with a degenerate-axis fallback.
+//
+// The original $P uses uniform scale (max(width, height)). That made the
+// recognizer aspect-ratio-sensitive: a stretched H or M would no longer
+// match its 1:1 template. We use anisotropic scale (independent x/y
+// normalization) so a 240×160 H still matches the 100×100 template.
+//
+// Single-line runes (이사 = pure vertical, 대지 = pure horizontal) and
+// near-degenerate strokes have one axis ≈ 0, so a pure anisotropic scale
+// would either divide by zero or amplify noise on that axis to a full unit
+// span. When one axis is much smaller than the other (< 10% of the larger),
+// fall back to uniform scale so single-line shapes keep their distinctive
+// 1D footprint inside the unit box.
 function Scale(points) {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (let i = 0; i < points.length; i++) {
@@ -101,13 +182,24 @@ function Scale(points) {
         maxX = Math.max(maxX, points[i].x);
         maxY = Math.max(maxY, points[i].y);
     }
-    const size = Math.max(maxX - minX, maxY - minY);
-    if (size === 0) return points; // Cannot scale a single point
-    
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const maxSize = Math.max(width, height);
+    if (maxSize === 0) return points;
+
+    const minRatio = 0.1;
+    let scaleX, scaleY;
+    if (width < maxSize * minRatio || height < maxSize * minRatio) {
+        scaleX = scaleY = maxSize;
+    } else {
+        scaleX = width;
+        scaleY = height;
+    }
+
     let newpoints = [];
     for (let i = 0; i < points.length; i++) {
-        let qx = (points[i].x - minX) / size;
-        let qy = (points[i].y - minY) / size;
+        let qx = (points[i].x - minX) / scaleX;
+        let qy = (points[i].y - minY) / scaleY;
         newpoints.push(new Point(qx, qy, points[i].id));
     }
     return newpoints;
@@ -183,6 +275,14 @@ class Template {
 }
 
 export class RecognitionEngine {
+    // Acceptance distance in normalized [0,1]^2 cloud space. See identifyRune.
+    // Anisotropic Scale lets stretched H/M/◇ match their templates, but tightens
+    // some sub-feature proportions (e.g. Tiwaz twig depth relative to stem),
+    // pushing some canonical drawings up to ~0.85. Random scribble distances
+    // sit around 1.5+, so 0.95 keeps a comfortable margin while admitting
+    // moderately stretched shapes.
+    static MATCH_THRESHOLD = 0.95;
+
     constructor() {
         this.templates = RAW_TEMPLATES.map(t => new Template(t.name, t.strokes));
     }
@@ -213,8 +313,10 @@ export class RecognitionEngine {
             }
         }
 
-        // Distance threshold for a valid match (lower is better, max distance is around 1.4 for 1x1 box)
-        if (bestDistance > 0.45) return null;
+        // Distance threshold for a valid match (lower is better, max distance is around 1.4 for 1x1 box).
+        // Empirically, freehand drawings of multi-stroke runes (Tiwaz, Algiz, Gebo) routinely
+        // produce distances in the 0.5–0.8 range; 0.45 was too strict and rejected most real input.
+        if (bestDistance > RecognitionEngine.MATCH_THRESHOLD) return null;
 
         console.log(`[P$ Recognizer] Matched: ${bestMatch.name} with dist: ${bestDistance.toFixed(3)}`);
         return bestMatch.name;
@@ -254,7 +356,7 @@ export class RecognitionEngine {
         if (avgSpeed > 1.5) dynamics = '거침(폭발적)';
         else if (avgSpeed < 0.3) dynamics = '느림(응축)';
 
-        // Radical Extraction Algorithm
+        // Compute the overall bounding box (used for radical-extraction fallback below).
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         runeStrokes.forEach(stroke => {
             stroke.forEach(pt => {
@@ -265,48 +367,62 @@ export class RecognitionEngine {
             });
         });
         const overallSize = Math.max(maxX - minX, maxY - minY);
-        
-        let mainStrokes = [];
-        let radicalModifiers = [];
-        let radicalCount = 0;
-
-        runeStrokes.forEach(stroke => {
-            let sMinX = Infinity, sMinY = Infinity, sMaxX = -Infinity, sMaxY = -Infinity;
-            stroke.forEach(pt => {
-                sMinX = Math.min(sMinX, pt.x);
-                sMinY = Math.min(sMinY, pt.y);
-                sMaxX = Math.max(sMaxX, pt.x);
-                sMaxY = Math.max(sMaxY, pt.y);
-            });
-            const w = sMaxX - sMinX;
-            const h = sMaxY - sMinY;
-            const size = Math.max(w, h);
-            
-            // If the stroke is very small compared to the overall rune, it's a radical
-            if (size < overallSize * 0.20 && overallSize > 50) {
-                radicalCount++;
-                if (w < 15 && h < 15) {
-                    radicalModifiers.push('[응축된]'); // Dot
-                } else if (w > h * 2) {
-                    radicalModifiers.push('[차단된]'); // Horizontal Bar
-                } else if (h > w * 2) {
-                    radicalModifiers.push('[탈취의]'); // Vertical Hook
-                } else {
-                    radicalModifiers.push('[변이된]'); // Generic wave/curve
-                }
-            } else {
-                mainStrokes.push(stroke);
-            }
-        });
 
         let finalMeaning = '알 수 없는 문양';
         let instabilityBonus = 20;
+        let radicalModifiers = [];
+        let radicalCount = 0;
 
-        // Identify the main shape
-        const matchedRune = this.identifyRune(mainStrokes.length > 0 ? mainStrokes : runeStrokes);
+        // Pass 1: try matching ALL strokes as one rune. Multi-stroke runes like Tiwaz/Algiz
+        // have inherent size variation (long stem + shorter twigs). The previous logic stripped
+        // the twigs as 'radicals' before matching, leaving only the stem and turning Tiwaz into
+        // [변이된]×2 이사(|). Try a holistic match first so well-drawn runes are recognized as-is.
+        let matchedRune = this.identifyRune(runeStrokes);
+
+        // Pass 2: only if the holistic match failed, treat clearly-small strokes as radicals
+        // and rematch the remaining "main" strokes. This preserves the README's radical-combination
+        // intent (열기△ + 대지ㅡ → 마그마) without breaking standalone multi-stroke runes.
+        if (!matchedRune) {
+            const mainStrokes = [];
+            runeStrokes.forEach(stroke => {
+                let sMinX = Infinity, sMinY = Infinity, sMaxX = -Infinity, sMaxY = -Infinity;
+                stroke.forEach(pt => {
+                    sMinX = Math.min(sMinX, pt.x);
+                    sMinY = Math.min(sMinY, pt.y);
+                    sMaxX = Math.max(sMaxX, pt.x);
+                    sMaxY = Math.max(sMaxY, pt.y);
+                });
+                const w = sMaxX - sMinX;
+                const h = sMaxY - sMinY;
+                const size = Math.max(w, h);
+
+                // Only strip truly small strokes (< 15% of overall bbox, and the rune itself is
+                // big enough to make "small" meaningful). The old 20% cutoff was eating Tiwaz twigs
+                // (which sit right at ~15% of the rune's bbox).
+                if (size < overallSize * 0.15 && overallSize > 50) {
+                    radicalCount++;
+                    if (w < 15 && h < 15) {
+                        radicalModifiers.push('[응축된]'); // Dot
+                    } else if (w > h * 2) {
+                        radicalModifiers.push('[차단된]'); // Horizontal Bar
+                    } else if (h > w * 2) {
+                        radicalModifiers.push('[탈취의]'); // Vertical Hook
+                    } else {
+                        radicalModifiers.push('[변이된]'); // Generic wave/curve
+                    }
+                } else {
+                    mainStrokes.push(stroke);
+                }
+            });
+
+            if (mainStrokes.length > 0 && mainStrokes.length < runeStrokes.length) {
+                matchedRune = this.identifyRune(mainStrokes);
+            }
+        }
+
         if (matchedRune) {
             finalMeaning = matchedRune;
-            instabilityBonus = 0; 
+            instabilityBonus = 0;
         }
 
         // Apply Radicals
