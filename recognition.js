@@ -119,6 +119,57 @@ const RAW_TEMPLATES = [
             [{x: 0, y: 0},   {x: 0,   y: 100}],
             [{x: 0, y: 100}, {x: 100, y: 100}]
         ]
+    },
+    {
+        name: '페오(F)', // Fehu: wealth / cattle
+        strokes: [
+            [{x: 20, y: 100}, {x: 20, y: 0}],
+            [{x: 20, y: 0},   {x: 80, y: 25}],
+            [{x: 20, y: 40},  {x: 80, y: 60}]
+        ]
+    },
+    {
+        name: '우르즈(∩)', // Uruz: strength / aurochs (arch)
+        strokes: [
+            [{x: 15, y: 100}, {x: 15, y: 20}],
+            [{x: 15, y: 20},  {x: 85, y: 20}],
+            [{x: 85, y: 20},  {x: 85, y: 100}]
+        ]
+    },
+    {
+        name: '소울로(⚡)', // Sowilo: sun / lightning bolt (zigzag)
+        strokes: [
+            [{x: 70, y: 0}, {x: 30, y: 35}, {x: 70, y: 65}, {x: 30, y: 100}]
+        ]
+    },
+    {
+        name: '베르카나(B)', // Berkana: birch / growth
+        strokes: [
+            [{x: 20, y: 0},  {x: 20, y: 100}],
+            [{x: 20, y: 0},  {x: 80, y: 25}, {x: 20, y: 50}],
+            [{x: 20, y: 50}, {x: 80, y: 75}, {x: 20, y: 100}]
+        ]
+    },
+    {
+        name: '오달라(Ω)', // Othala: homeland / heritage (diamond + legs)
+        strokes: [
+            [{x: 50, y: 0}, {x: 85, y: 35}, {x: 50, y: 70}, {x: 15, y: 35}, {x: 50, y: 0}],
+            [{x: 15, y: 35}, {x: 15, y: 100}],
+            [{x: 85, y: 35}, {x: 85, y: 100}]
+        ]
+    },
+    {
+        name: '투리사즈(þ)', // Thurisaz: thorn / giant
+        strokes: [
+            [{x: 25, y: 0},  {x: 25, y: 100}],
+            [{x: 25, y: 20}, {x: 80, y: 45}, {x: 25, y: 65}]
+        ]
+    },
+    {
+        name: '에이와즈(ᛇ)', // Eihwaz: yew tree / endurance (vertical zigzag)
+        strokes: [
+            [{x: 60, y: 0}, {x: 60, y: 45}, {x: 40, y: 55}, {x: 40, y: 100}]
+        ]
     }
 ];
 
@@ -574,19 +625,121 @@ function relativePosition(mainBbox, radicalBbox) {
     return dx < 0 ? 'left' : 'right';
 }
 
-// Positional combination table. README's seed example was 열기△ + 대지ㅡ → 마그마.
-// We extend along that axis: same two runes give different results depending on
-// where the bar sits relative to the triangle, plus a couple lore-friendly combos
-// for 이사(|) and 원(○). Add more entries here over time.
+// Positional combination table.
+// Same two runes produce different results depending on where the radical sits
+// relative to the main rune (above / below / middle / left / right).
 const COMBINATIONS = [
-    { main: '열기(△)', radical: '대지(ㅡ)', position: 'below',  name: '마그마',     dynamics: '꿈틀거림(흐름)',   instabilityBonus: 30 },
-    { main: '열기(△)', radical: '대지(ㅡ)', position: 'middle', name: '증기',       dynamics: '뜨거움(확산)',     instabilityBonus: 50 },
-    { main: '열기(△)', radical: '대지(ㅡ)', position: 'above',  name: '폭발',       dynamics: '거침(임계)',       instabilityBonus: 80 },
-    { main: '이사(|)', radical: '이사(|)',  position: 'right',  name: '쌍둥이 기둥', dynamics: '안정적(공명)',     instabilityBonus: 0  },
+    // ─── 열기(△) ────────────────────────────────────────────────
+    { main: '열기(△)', radical: '대지(ㅡ)', position: 'below',  name: '마그마',       dynamics: '꿈틀거림(흐름)',   instabilityBonus: 30 },
+    { main: '열기(△)', radical: '대지(ㅡ)', position: 'middle', name: '증기',         dynamics: '뜨거움(확산)',     instabilityBonus: 50 },
+    { main: '열기(△)', radical: '대지(ㅡ)', position: 'above',  name: '폭발',         dynamics: '거침(임계)',       instabilityBonus: 80 },
+    { main: '열기(△)', radical: '이사(|)',  position: 'middle', name: '용광로',       dynamics: '맹렬함(소각)',     instabilityBonus: 60 },
+    { main: '열기(△)', radical: '이사(|)',  position: 'right',  name: '횃불',         dynamics: '안정적(발광)',     instabilityBonus: 10 },
+    { main: '열기(△)', radical: '라구즈(L)', position: 'below', name: '온천',         dynamics: '따뜻함(치유)',     instabilityBonus: 5  },
+    { main: '열기(△)', radical: '라구즈(L)', position: 'middle', name: '끓는 강',     dynamics: '거침(범람)',       instabilityBonus: 55 },
+    { main: '열기(△)', radical: '원(○)',    position: 'middle', name: '태양핵',       dynamics: '폭렬(핵융합)',     instabilityBonus: 90 },
+    { main: '열기(△)', radical: '알기즈(Y)', position: 'above', name: '불의 수호자',  dynamics: '맹렬함(방어)',     instabilityBonus: 25 },
+    { main: '열기(△)', radical: '소울로(⚡)', position: 'above', name: '번개 불꽃',   dynamics: '격렬함(연쇄)',     instabilityBonus: 70 },
+
+    // ─── 이사(|) ────────────────────────────────────────────────
+    { main: '이사(|)', radical: '이사(|)',   position: 'right',  name: '쌍둥이 기둥', dynamics: '안정적(공명)',     instabilityBonus: 0  },
+    { main: '이사(|)', radical: '대지(ㅡ)',  position: 'middle', name: '십자빙',      dynamics: '차가움(결정)',     instabilityBonus: 15 },
+    { main: '이사(|)', radical: '라구즈(L)', position: 'below',  name: '빙하',        dynamics: '느림(응축)',       instabilityBonus: 10 },
+    { main: '이사(|)', radical: '소울로(⚡)', position: 'right', name: '서리 번개',   dynamics: '격렬함(균열)',     instabilityBonus: 65 },
+    { main: '이사(|)', radical: '열기(△)',   position: 'above',  name: '해빙',        dynamics: '따뜻함(용해)',     instabilityBonus: 20 },
+
+    // ─── 원(○) ──────────────────────────────────────────────────
     { main: '원(○)',   radical: '대지(ㅡ)', position: 'middle', name: '봉인된 태양', dynamics: '갇힘(억눌림)',     instabilityBonus: 40 },
-    { main: '원(○)',   radical: '대지(ㅡ)', position: 'below',  name: '일출',       dynamics: '느림(응축)',       instabilityBonus: 10 },
-    { main: '원(○)',   radical: '대지(ㅡ)', position: 'above',  name: '일몰',       dynamics: '느림(응축)',       instabilityBonus: 10 },
-    { main: '하갈라즈(H)', radical: '대지(ㅡ)', position: 'below', name: '얼어붙은 강', dynamics: '안정적(지속)',  instabilityBonus: 0  },
+    { main: '원(○)',   radical: '대지(ㅡ)', position: 'below',  name: '일출',        dynamics: '느림(응축)',       instabilityBonus: 10 },
+    { main: '원(○)',   radical: '대지(ㅡ)', position: 'above',  name: '일몰',        dynamics: '느림(응축)',       instabilityBonus: 10 },
+    { main: '원(○)',   radical: '이사(|)',  position: 'middle', name: '분할된 달',   dynamics: '불안정(양면)',     instabilityBonus: 35 },
+    { main: '원(○)',   radical: '열기(△)',  position: 'below',  name: '화산구',      dynamics: '위험(분화)',       instabilityBonus: 70 },
+    { main: '원(○)',   radical: '열기(△)',  position: 'above',  name: '태양관',      dynamics: '안정적(빛)',       instabilityBonus: 15 },
+    { main: '원(○)',   radical: '나우디즈(+)', position: 'middle', name: '봉인의 원진', dynamics: '강력(속박)',    instabilityBonus: 45 },
+    { main: '원(○)',   radical: '알기즈(Y)', position: 'above',  name: '생명의 나무', dynamics: '자연(성장)',      instabilityBonus: 5  },
+
+    // ─── 하갈라즈(H) ────────────────────────────────────────────
+    { main: '하갈라즈(H)', radical: '대지(ㅡ)', position: 'below', name: '얼어붙은 강',   dynamics: '안정적(지속)',  instabilityBonus: 0  },
+    { main: '하갈라즈(H)', radical: '열기(△)',  position: 'above', name: '용해로',        dynamics: '뜨거움(파괴)',  instabilityBonus: 55 },
+    { main: '하갈라즈(H)', radical: '이사(|)',  position: 'right', name: '감옥',          dynamics: '차가움(속박)',  instabilityBonus: 20 },
+
+    // ─── 알기즈(Y) ──────────────────────────────────────────────
+    { main: '알기즈(Y)', radical: '대지(ㅡ)', position: 'below',  name: '뿌리 방벽',   dynamics: '안정적(방어)',  instabilityBonus: 0  },
+    { main: '알기즈(Y)', radical: '원(○)',    position: 'above',  name: '보호의 후광', dynamics: '안정적(축복)',  instabilityBonus: 5  },
+    { main: '알기즈(Y)', radical: '열기(△)',  position: 'below',  name: '화염 방벽',   dynamics: '맹렬함(방어)',  instabilityBonus: 35 },
+    { main: '알기즈(Y)', radical: '이사(|)',  position: 'middle', name: '얼음 가시',   dynamics: '차가움(반격)',  instabilityBonus: 25 },
+
+    // ─── 티와즈(↑) ──────────────────────────────────────────────
+    { main: '티와즈(↑)', radical: '대지(ㅡ)',  position: 'below',  name: '대지의 창',     dynamics: '안정적(관통)', instabilityBonus: 10 },
+    { main: '티와즈(↑)', radical: '열기(△)',   position: 'below',  name: '불꽃 투창',     dynamics: '맹렬함(발사)', instabilityBonus: 40 },
+    { main: '티와즈(↑)', radical: '알기즈(Y)', position: 'above',  name: '성전사의 맹세', dynamics: '강력(자기희생)', instabilityBonus: 50 },
+    { main: '티와즈(↑)', radical: '소울로(⚡)', position: 'above', name: '토르의 창',     dynamics: '격렬함(낙뢰)', instabilityBonus: 75 },
+
+    // ─── 게보(X) ────────────────────────────────────────────────
+    { main: '게보(X)', radical: '원(○)',    position: 'middle', name: '등가 교환',  dynamics: '균형(순환)',   instabilityBonus: 30 },
+    { main: '게보(X)', radical: '대지(ㅡ)', position: 'below',  name: '계약',       dynamics: '안정적(속박)', instabilityBonus: 15 },
+    { main: '게보(X)', radical: '열기(△)',  position: 'above',  name: '제물의 불',  dynamics: '위험(소진)',   instabilityBonus: 60 },
+
+    // ─── 다가즈(◇) ──────────────────────────────────────────────
+    { main: '다가즈(◇)', radical: '이사(|)',  position: 'middle', name: '새벽의 기둥',     dynamics: '빛(관통)',   instabilityBonus: 20 },
+    { main: '다가즈(◇)', radical: '대지(ㅡ)', position: 'below',  name: '수평선의 새벽',   dynamics: '느림(전환)', instabilityBonus: 10 },
+    { main: '다가즈(◇)', radical: '열기(△)',  position: 'above',  name: '여명의 불꽃',     dynamics: '빛(폭발)',   instabilityBonus: 45 },
+
+    // ─── 케나즈(<) ──────────────────────────────────────────────
+    { main: '케나즈(<)', radical: '이사(|)', position: 'left',  name: '횃불 기둥', dynamics: '안정적(발광)', instabilityBonus: 10 },
+    { main: '케나즈(<)', radical: '열기(△)', position: 'right', name: '화염 방사', dynamics: '맹렬함(확산)', instabilityBonus: 55 },
+    { main: '케나즈(<)', radical: '원(○)',   position: 'right', name: '등대',      dynamics: '안정적(인도)', instabilityBonus: 5  },
+
+    // ─── 나우디즈(+) ────────────────────────────────────────────
+    { main: '나우디즈(+)', radical: '열기(△)', position: 'above',  name: '시련의 불', dynamics: '위험(정화)',    instabilityBonus: 55 },
+    { main: '나우디즈(+)', radical: '이사(|)', position: 'middle', name: '동결 봉인', dynamics: '차가움(정지)',  instabilityBonus: 30 },
+
+    // ─── 라구즈(L) ──────────────────────────────────────────────
+    { main: '라구즈(L)', radical: '대지(ㅡ)',   position: 'above', name: '댐',         dynamics: '안정적(저장)', instabilityBonus: 5  },
+    { main: '라구즈(L)', radical: '이사(|)',    position: 'right', name: '빙하의 강',  dynamics: '느림(동결)',   instabilityBonus: 15 },
+    { main: '라구즈(L)', radical: '소울로(⚡)', position: 'above', name: '폭풍우',     dynamics: '격렬함(범람)', instabilityBonus: 60 },
+
+    // ─── 에와즈(M) ──────────────────────────────────────────────
+    { main: '에와즈(M)', radical: '대지(ㅡ)', position: 'below', name: '마차',        dynamics: '안정적(이동)', instabilityBonus: 5  },
+    { main: '에와즈(M)', radical: '열기(△)',  position: 'above', name: '불의 기마병', dynamics: '맹렬함(돌진)', instabilityBonus: 50 },
+    { main: '에와즈(M)', radical: '원(○)',    position: 'above', name: '차원문',      dynamics: '불안정(공간)', instabilityBonus: 70 },
+
+    // ─── 페오(F) ────────────────────────────────────────────────
+    { main: '페오(F)', radical: '대지(ㅡ)', position: 'below', name: '금광',        dynamics: '안정적(축적)', instabilityBonus: 10 },
+    { main: '페오(F)', radical: '열기(△)',  position: 'above', name: '연금술의 불', dynamics: '위험(변환)',   instabilityBonus: 45 },
+    { main: '페오(F)', radical: '게보(X)',   position: 'right', name: '거래',        dynamics: '균형(교환)',   instabilityBonus: 20 },
+
+    // ─── 우르즈(∩) ──────────────────────────────────────────────
+    { main: '우르즈(∩)', radical: '열기(△)',  position: 'middle', name: '용의 숨결',     dynamics: '맹렬함(소각)', instabilityBonus: 65 },
+    { main: '우르즈(∩)', radical: '이사(|)',  position: 'middle', name: '얼음 감옥',     dynamics: '차가움(속박)', instabilityBonus: 25 },
+    { main: '우르즈(∩)', radical: '대지(ㅡ)', position: 'below',  name: '거인의 발걸음', dynamics: '무거움(진동)', instabilityBonus: 30 },
+
+    // ─── 소울로(⚡) ─────────────────────────────────────────────
+    { main: '소울로(⚡)', radical: '대지(ㅡ)', position: 'below',  name: '지진',       dynamics: '격렬함(균열)',   instabilityBonus: 60 },
+    { main: '소울로(⚡)', radical: '원(○)',    position: 'middle', name: '플라즈마 구', dynamics: '폭렬(불안정)',   instabilityBonus: 85 },
+    { main: '소울로(⚡)', radical: '이사(|)',  position: 'right',  name: '피뢰침',     dynamics: '안정적(유도)',   instabilityBonus: 15 },
+    { main: '소울로(⚡)', radical: '열기(△)', position: 'below',  name: '화산 번개',  dynamics: '격렬함(연쇄)',   instabilityBonus: 80 },
+
+    // ─── 베르카나(B) ────────────────────────────────────────────
+    { main: '베르카나(B)', radical: '대지(ㅡ)', position: 'below', name: '뿌리',       dynamics: '느림(성장)',   instabilityBonus: 0  },
+    { main: '베르카나(B)', radical: '원(○)',    position: 'above', name: '열매',       dynamics: '안정적(결실)', instabilityBonus: 5  },
+    { main: '베르카나(B)', radical: '열기(△)', position: 'above',  name: '산불',       dynamics: '맹렬함(파괴)', instabilityBonus: 60 },
+    { main: '베르카나(B)', radical: '라구즈(L)', position: 'below', name: '습지',      dynamics: '느림(부식)',   instabilityBonus: 20 },
+
+    // ─── 투리사즈(þ) ────────────────────────────────────────────
+    { main: '투리사즈(þ)', radical: '열기(△)', position: 'above',  name: '불가시',       dynamics: '맹렬함(관통)', instabilityBonus: 50 },
+    { main: '투리사즈(þ)', radical: '이사(|)', position: 'right',  name: '얼음 가시울타리', dynamics: '차가움(방어)', instabilityBonus: 15 },
+    { main: '투리사즈(þ)', radical: '대지(ㅡ)', position: 'below', name: '가시밭',       dynamics: '안정적(함정)', instabilityBonus: 10 },
+
+    // ─── 오달라(Ω) ──────────────────────────────────────────────
+    { main: '오달라(Ω)', radical: '열기(△)',  position: 'above',  name: '불타는 고향',   dynamics: '위험(상실)',  instabilityBonus: 70 },
+    { main: '오달라(Ω)', radical: '알기즈(Y)', position: 'above', name: '조상의 축복',   dynamics: '안정적(보호)', instabilityBonus: 0  },
+    { main: '오달라(Ω)', radical: '대지(ㅡ)', position: 'below',  name: '영토',         dynamics: '안정적(확장)', instabilityBonus: 5  },
+
+    // ─── 에이와즈(ᛇ) ────────────────────────────────────────────
+    { main: '에이와즈(ᛇ)', radical: '대지(ㅡ)', position: 'below', name: '세계수의 뿌리', dynamics: '느림(영원)',    instabilityBonus: 0  },
+    { main: '에이와즈(ᛇ)', radical: '원(○)',    position: 'above', name: '세계수의 과실', dynamics: '안정적(재생)',  instabilityBonus: 5  },
+    { main: '에이와즈(ᛇ)', radical: '소울로(⚡)', position: 'above', name: '벼락 맞은 나무', dynamics: '격렬함(분열)', instabilityBonus: 75 },
 ];
 
 function lookupCombination(mainName, radicalName, position) {

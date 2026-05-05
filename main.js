@@ -147,6 +147,56 @@ const archives = [
       '<circle cx="50" cy="50" r="28" stroke="rgba(255,255,255,0.5)" stroke-width="3" fill="none"/>' +
       '<line x1="15" y1="50" x2="85" y2="50" stroke="rgba(255,170,0,0.9)" stroke-width="3"/>' +
       '</svg>'
+  },
+  {
+    id: 16,
+    lore: '"재물의 페오(F). 기둥을 세운 뒤 꼭대기에서 가지를 뻗고, 허리께에서 한 번 더 뻗어라. 두 가지가 부를 긁어 모으리라."',
+    svg: lineSvg([[20,85,20,15],[20,15,80,30],[20,45,80,60]])
+  },
+  {
+    id: 17,
+    lore: '"힘의 우르즈(∩). 두 기둥을 세우고 그 사이를 가로지르는 지붕을 얹어라. 야생 들소의 뿔처럼 단단하리라."',
+    svg: lineSvg([[20,85,20,25],[20,25,80,25],[80,25,80,85]])
+  },
+  {
+    id: 18,
+    lore: '"번개의 소울로(⚡). 지그재그로 내리꽂아라. 빠르게 긋되 꺾이는 곳을 정확히 찍어야 한다. 천둥이 따를 것이다."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100"><polyline points="70,10 30,40 70,60 30,90" stroke="rgba(255,255,255,0.5)" stroke-width="3" fill="none"/></svg>'
+  },
+  {
+    id: 19,
+    lore: '"자작나무의 베르카나(B). 기둥을 먼저 긋고, 위아래로 두 개의 둥근 혹을 그려 붙여라. 싹이 돋고 열매가 맺히리라."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100"><line x1="20" y1="10" x2="20" y2="90" stroke="rgba(255,255,255,0.5)" stroke-width="3"/><path d="M20,10 Q80,25 20,50" stroke="rgba(255,255,255,0.5)" stroke-width="3" fill="none"/><path d="M20,50 Q80,75 20,90" stroke="rgba(255,255,255,0.5)" stroke-width="3" fill="none"/></svg>'
+  },
+  {
+    id: 20,
+    lore: '"고향의 오달라(Ω). 마름모를 닫은 뒤 양 하단에서 다리를 뻗어라. 조상의 땅이 네 발 아래 펼쳐지리라."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100"><polygon points="50,10 82,38 50,66 18,38" stroke="rgba(255,255,255,0.5)" stroke-width="3" fill="none"/><line x1="18" y1="38" x2="18" y2="88" stroke="rgba(255,255,255,0.5)" stroke-width="3"/><line x1="82" y1="38" x2="82" y2="88" stroke="rgba(255,255,255,0.5)" stroke-width="3"/></svg>'
+  },
+  {
+    id: 21,
+    lore: '"가시의 투리사즈(þ). 곧은 기둥을 세우고, 한쪽으로 뾰족한 혹을 돌출시켜라. 거인의 가시가 침입자를 막으리라."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100"><line x1="25" y1="10" x2="25" y2="90" stroke="rgba(255,255,255,0.5)" stroke-width="3"/><path d="M25,25 Q80,45 25,65" stroke="rgba(255,255,255,0.5)" stroke-width="3" fill="none"/></svg>'
+  },
+  {
+    id: 22,
+    lore: '"세계수의 에이와즈(ᛇ). 기둥이 중간에서 한 번 어긋나게 꺾여야 한다. 주목나무처럼 삶과 죽음을 잇는 형태다."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100"><polyline points="60,10 60,45 40,55 40,90" stroke="rgba(255,255,255,0.5)" stroke-width="3" fill="none"/></svg>'
+  },
+  {
+    id: 23,
+    lore: '"원소의 교차: 번개(⚡)와 불(△)이 만나면 화산 번개가 치고, 번개 아래 대지(ㅡ)를 깔면 지진이 일어난다. 번개 옆에 기둥(|)을 세우면 피뢰침이 되어 안정을 얻는다."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100"><polyline points="60,10 35,35 60,55 35,80" stroke="rgba(0,200,255,0.8)" stroke-width="3" fill="none"/><line x1="15" y1="85" x2="85" y2="85" stroke="rgba(255,170,0,0.9)" stroke-width="3"/></svg>'
+  },
+  {
+    id: 24,
+    lore: '"전투의 조합: 투창(↑) 아래에 불(△)을 놓으면 불꽃 투창이 솟구치고, 방패(Y) 아래 불(△)을 쌓으면 화염 방벽이 일어선다. 위치가 곧 전술이다."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100"><line x1="50" y1="10" x2="50" y2="55" stroke="rgba(0,255,255,0.8)" stroke-width="3"/><line x1="50" y1="10" x2="25" y2="35" stroke="rgba(0,255,255,0.8)" stroke-width="3"/><line x1="50" y1="10" x2="75" y2="35" stroke="rgba(0,255,255,0.8)" stroke-width="3"/><polygon points="50,62 30,85 70,85" stroke="rgba(255,100,50,0.8)" stroke-width="2" fill="none"/></svg>'
+  },
+  {
+    id: 25,
+    lore: '"자연과 정령: 자작나무(B) 아래 물(L)을 흘리면 습지가 생기고, 세계수(ᛇ) 위에 원(○)을 올리면 과실이 맺힌다. 고향(Ω) 위에 방패(Y)를 세우면 조상의 축복이 내린다."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100"><line x1="25" y1="10" x2="25" y2="60" stroke="rgba(255,255,255,0.5)" stroke-width="3"/><path d="M25,10 Q65,25 25,45" stroke="rgba(255,255,255,0.5)" stroke-width="3" fill="none"/><line x1="15" y1="75" x2="15" y2="90" stroke="rgba(100,200,255,0.8)" stroke-width="3"/><line x1="15" y1="90" x2="50" y2="90" stroke="rgba(100,200,255,0.8)" stroke-width="3"/></svg>'
   }
 ];
 
