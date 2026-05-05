@@ -332,7 +332,7 @@ export class RecognitionEngine {
 
     analyzeRune(runeStrokes, boneStrokes = []) {
         if (runeStrokes.length === 0) {
-            return { radicals: [], dynamics: '대기 중', meaning: '알 수 없는 문양', avgSpeed: 0, instabilityModifier: 0 };
+            return { radicals: [], dynamics: '대기 중', meaning: '알 수 없는 문양', compoundName: null, avgSpeed: 0, instabilityModifier: 0 };
         }
 
         let totalSpeed = 0;
@@ -357,55 +357,97 @@ export class RecognitionEngine {
         else if (avgSpeed < 0.3) dynamics = '느림(응축)';
 
         // Compute the overall bounding box (used for radical-extraction fallback below).
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        runeStrokes.forEach(stroke => {
-            stroke.forEach(pt => {
-                minX = Math.min(minX, pt.x);
-                minY = Math.min(minY, pt.y);
-                maxX = Math.max(maxX, pt.x);
-                maxY = Math.max(maxY, pt.y);
-            });
-        });
-        const overallSize = Math.max(maxX - minX, maxY - minY);
+        const overallBbox = bboxOfStrokes(runeStrokes);
+        const overallSize = Math.max(overallBbox.w, overallBbox.h);
 
         let finalMeaning = '알 수 없는 문양';
         let instabilityBonus = 20;
         let radicalModifiers = [];
         let radicalCount = 0;
+        let compoundName = null;
+        let compoundDynamics = null;
 
-        // Pass 1: try matching ALL strokes as one rune. Multi-stroke runes like Tiwaz/Algiz
+        // Pass 1 (compound, README "radical combination"): try to find a
+        // partition of the strokes into "main rune" + "radical rune" where each
+        // half identifies as a known template AND the pair has an entry in the
+        // positional combination table. This catches:
+        //   - well-separated drawings (열기△ next to 대지ㅡ below it),
+        //   - and overlapping ones (대지ㅡ drawn through the middle of △).
+        // Two strategies:
+        //   (a) spatial clustering — fast, handles separated drawings,
+        //   (b) leave-one-stroke-out — handles cases where the radical bbox
+        //       overlaps the main rune (e.g. bar through center).
+        // Compound only fires when a (mainName, radicalName, position) tuple
+        // has an explicit COMBINATIONS entry, so spurious template matches on
+        // sub-stroke groupings can't produce false positives.
+        const tryCompound = (groupA, groupB) => {
+            if (groupA.length === 0 || groupB.length === 0) return null;
+            const idA = this.identifyRune(groupA);
+            const idB = this.identifyRune(groupB);
+            if (!idA || !idB) return null;
+            const bA = bboxOfStrokes(groupA);
+            const bB = bboxOfStrokes(groupB);
+            // The "main" cluster is whichever has more strokes; ties broken by
+            // larger bounding box. The other cluster is the radical/decorator.
+            const isAMain =
+                groupA.length > groupB.length ||
+                (groupA.length === groupB.length && bA.w * bA.h >= bB.w * bB.h);
+            const mainName = isAMain ? idA : idB;
+            const radicalName = isAMain ? idB : idA;
+            const mainBbox = isAMain ? bA : bB;
+            const radicalBbox = isAMain ? bB : bA;
+            const position = relativePosition(mainBbox, radicalBbox);
+            return lookupCombination(mainName, radicalName, position);
+        };
+
+        let combo = null;
+        // (a) Spatial clusters.
+        const clusters = clusterStrokesByProximity(runeStrokes);
+        if (clusters.length === 2) {
+            combo = tryCompound(clusters[0], clusters[1]);
+        }
+        // (b) Leave-one-stroke-out (only when clustering didn't already find a
+        // combination, and only for stroke counts where the search is cheap).
+        if (!combo && runeStrokes.length >= 2 && runeStrokes.length <= 6) {
+            for (let i = 0; i < runeStrokes.length && !combo; i++) {
+                const main = runeStrokes.filter((_, j) => j !== i);
+                const radical = [runeStrokes[i]];
+                combo = tryCompound(main, radical);
+            }
+        }
+        if (combo) {
+            compoundName = combo.name;
+            compoundDynamics = combo.dynamics || null;
+            finalMeaning = combo.name;
+            instabilityBonus = combo.instabilityBonus;
+        }
+
+        // Pass 2: try matching ALL strokes as one rune. Multi-stroke runes like Tiwaz/Algiz
         // have inherent size variation (long stem + shorter twigs). The previous logic stripped
         // the twigs as 'radicals' before matching, leaving only the stem and turning Tiwaz into
         // [변이된]×2 이사(|). Try a holistic match first so well-drawn runes are recognized as-is.
-        let matchedRune = this.identifyRune(runeStrokes);
+        let matchedRune = compoundName ? null : this.identifyRune(runeStrokes);
 
-        // Pass 2: only if the holistic match failed, treat clearly-small strokes as radicals
-        // and rematch the remaining "main" strokes. This preserves the README's radical-combination
-        // intent (열기△ + 대지ㅡ → 마그마) without breaking standalone multi-stroke runes.
-        if (!matchedRune) {
+        // Pass 3: only if both compound + holistic matches failed, treat clearly-small strokes
+        // as decorative radicals and rematch the remaining "main" strokes. This preserves
+        // the legacy [응축된]/[차단된]/[탈취의]/[변이된] modifier flavor for cases the
+        // positional combo table doesn't cover.
+        if (!compoundName && !matchedRune) {
             const mainStrokes = [];
             runeStrokes.forEach(stroke => {
-                let sMinX = Infinity, sMinY = Infinity, sMaxX = -Infinity, sMaxY = -Infinity;
-                stroke.forEach(pt => {
-                    sMinX = Math.min(sMinX, pt.x);
-                    sMinY = Math.min(sMinY, pt.y);
-                    sMaxX = Math.max(sMaxX, pt.x);
-                    sMaxY = Math.max(sMaxY, pt.y);
-                });
-                const w = sMaxX - sMinX;
-                const h = sMaxY - sMinY;
-                const size = Math.max(w, h);
+                const b = bboxOfStrokes([stroke]);
+                const size = Math.max(b.w, b.h);
 
                 // Only strip truly small strokes (< 15% of overall bbox, and the rune itself is
                 // big enough to make "small" meaningful). The old 20% cutoff was eating Tiwaz twigs
                 // (which sit right at ~15% of the rune's bbox).
                 if (size < overallSize * 0.15 && overallSize > 50) {
                     radicalCount++;
-                    if (w < 15 && h < 15) {
+                    if (b.w < 15 && b.h < 15) {
                         radicalModifiers.push('[응축된]'); // Dot
-                    } else if (w > h * 2) {
+                    } else if (b.w > b.h * 2) {
                         radicalModifiers.push('[차단된]'); // Horizontal Bar
-                    } else if (h > w * 2) {
+                    } else if (b.h > b.w * 2) {
                         radicalModifiers.push('[탈취의]'); // Vertical Hook
                     } else {
                         radicalModifiers.push('[변이된]'); // Generic wave/curve
@@ -420,13 +462,14 @@ export class RecognitionEngine {
             }
         }
 
-        if (matchedRune) {
+        if (!compoundName && matchedRune) {
             finalMeaning = matchedRune;
             instabilityBonus = 0;
         }
 
-        // Apply Radicals
-        if (radicalModifiers.length > 0) {
+        // Apply Radicals (legacy modifier text). Skipped when a compound name took over,
+        // since that name already encodes the relationship.
+        if (!compoundName && radicalModifiers.length > 0) {
             finalMeaning = `${radicalModifiers.join(' ')} ${finalMeaning}`;
         }
 
@@ -449,10 +492,106 @@ export class RecognitionEngine {
 
         return {
             radicals: radArr,
-            dynamics: dynamics,
+            dynamics: compoundDynamics || dynamics,
             meaning: finalMeaning,
+            compoundName: compoundName,
             avgSpeed: avgSpeed,
             instabilityModifier: instabilityBonus
         };
     }
 }
+
+// --- Spatial helpers and combination table ---------------------------------
+
+// Return {minX, minY, maxX, maxY, w, h, cx, cy} for a list of strokes.
+function bboxOfStrokes(strokes) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    strokes.forEach(stroke => {
+        stroke.forEach(pt => {
+            if (pt.x < minX) minX = pt.x;
+            if (pt.y < minY) minY = pt.y;
+            if (pt.x > maxX) maxX = pt.x;
+            if (pt.y > maxY) maxY = pt.y;
+        });
+    });
+    if (minX === Infinity) {
+        return { minX: 0, minY: 0, maxX: 0, maxY: 0, w: 0, h: 0, cx: 0, cy: 0 };
+    }
+    return {
+        minX, minY, maxX, maxY,
+        w: maxX - minX,
+        h: maxY - minY,
+        cx: (minX + maxX) / 2,
+        cy: (minY + maxY) / 2,
+    };
+}
+
+// Cluster strokes into spatially separate groups. Two strokes belong to the
+// same group when their bounding boxes (inflated by `pad`) overlap. Used to
+// detect "two runes drawn next to each other" for compound matching.
+function clusterStrokesByProximity(strokes) {
+    if (strokes.length <= 1) return strokes.map(s => [s]);
+    const overall = bboxOfStrokes(strokes);
+    // Pad by 6% of the overall span on each side; this is loose enough that
+    // a Tiwaz stem and twigs which actually touch get merged, but tight enough
+    // that a separately-drawn 대지(ㅡ) below a △ stays its own group.
+    const pad = Math.max(overall.w, overall.h) * 0.06;
+    const boxes = strokes.map(s => bboxOfStrokes([s]));
+    const parent = strokes.map((_, i) => i);
+    const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+    for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+            const a = boxes[i], b = boxes[j];
+            const overlapsX = a.minX - pad <= b.maxX && b.minX - pad <= a.maxX;
+            const overlapsY = a.minY - pad <= b.maxY && b.minY - pad <= a.maxY;
+            if (overlapsX && overlapsY) union(i, j);
+        }
+    }
+    const buckets = new Map();
+    for (let i = 0; i < strokes.length; i++) {
+        const r = find(i);
+        if (!buckets.has(r)) buckets.set(r, []);
+        buckets.get(r).push(strokes[i]);
+    }
+    return Array.from(buckets.values());
+}
+
+// Classify the radical's center relative to the main rune's bbox.
+// Y axis grows downward (canvas convention), so smaller y === "above".
+// Returns one of: 'above', 'below', 'left', 'right', 'middle'.
+function relativePosition(mainBbox, radicalBbox) {
+    const dx = radicalBbox.cx - mainBbox.cx;
+    const dy = radicalBbox.cy - mainBbox.cy;
+    // "Inside" the main rune both horizontally and vertically → middle.
+    const insideX = radicalBbox.cx >= mainBbox.minX && radicalBbox.cx <= mainBbox.maxX;
+    const insideY = radicalBbox.cy >= mainBbox.minY && radicalBbox.cy <= mainBbox.maxY;
+    if (insideX && insideY) return 'middle';
+    // Otherwise pick the dominant axis.
+    if (Math.abs(dy) >= Math.abs(dx)) {
+        return dy < 0 ? 'above' : 'below';
+    }
+    return dx < 0 ? 'left' : 'right';
+}
+
+// Positional combination table. README's seed example was 열기△ + 대지ㅡ → 마그마.
+// We extend along that axis: same two runes give different results depending on
+// where the bar sits relative to the triangle, plus a couple lore-friendly combos
+// for 이사(|) and 원(○). Add more entries here over time.
+const COMBINATIONS = [
+    { main: '열기(△)', radical: '대지(ㅡ)', position: 'below',  name: '마그마',     dynamics: '꿈틀거림(흐름)',   instabilityBonus: 30 },
+    { main: '열기(△)', radical: '대지(ㅡ)', position: 'middle', name: '증기',       dynamics: '뜨거움(확산)',     instabilityBonus: 50 },
+    { main: '열기(△)', radical: '대지(ㅡ)', position: 'above',  name: '폭발',       dynamics: '거침(임계)',       instabilityBonus: 80 },
+    { main: '이사(|)', radical: '이사(|)',  position: 'right',  name: '쌍둥이 기둥', dynamics: '안정적(공명)',     instabilityBonus: 0  },
+    { main: '원(○)',   radical: '대지(ㅡ)', position: 'middle', name: '봉인된 태양', dynamics: '갇힘(억눌림)',     instabilityBonus: 40 },
+    { main: '원(○)',   radical: '대지(ㅡ)', position: 'below',  name: '일출',       dynamics: '느림(응축)',       instabilityBonus: 10 },
+    { main: '원(○)',   radical: '대지(ㅡ)', position: 'above',  name: '일몰',       dynamics: '느림(응축)',       instabilityBonus: 10 },
+    { main: '하갈라즈(H)', radical: '대지(ㅡ)', position: 'below', name: '얼어붙은 강', dynamics: '안정적(지속)',  instabilityBonus: 0  },
+];
+
+function lookupCombination(mainName, radicalName, position) {
+    return COMBINATIONS.find(c => c.main === mainName && c.radical === radicalName && c.position === position) || null;
+}
+
+// Exposed for tests and debug.
+export const __INTERNAL__ = { bboxOfStrokes, clusterStrokesByProximity, relativePosition, lookupCombination, COMBINATIONS };

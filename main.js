@@ -19,6 +19,7 @@ const state = {
   instability: 0,
   currentMeaning: '',
   currentDynamics: '',
+  currentCompound: null, // non-null when two runes combined into a named effect
   overloaded: false
 };
 
@@ -128,6 +129,24 @@ const archives = [
     id: 13,
     lore: '"흐름의 라구즈(L). 곧추선 기둥을 세우고 발치에서 가로로 흘려보내라. 물이 향하는 길을 일러줄 것이다."',
     svg: lineSvg([[15,15,15,85],[15,85,85,85]])
+  },
+  {
+    id: 14,
+    lore: '"열기(△)와 대지(ㅡ)는 가까이 있을 때 결합한다. 대지를 봉우리 아래로 그으면 마그마가 솟아오르고, 봉우리를 가르며 그으면 증기가 새며, 봉우리 위에 뚜껑처럼 얹으면 폭발이 잉태된다."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100">' +
+      '<line x1="50" y1="20" x2="20" y2="65" stroke="rgba(255,255,255,0.5)" stroke-width="3"/>' +
+      '<line x1="20" y1="65" x2="80" y2="65" stroke="rgba(255,255,255,0.5)" stroke-width="3"/>' +
+      '<line x1="80" y1="65" x2="50" y2="20" stroke="rgba(255,255,255,0.5)" stroke-width="3"/>' +
+      '<line x1="20" y1="82" x2="80" y2="82" stroke="rgba(255,170,0,0.9)" stroke-width="3"/>' +
+      '</svg>'
+  },
+  {
+    id: 15,
+    lore: '"원(○)을 가로지르는 한 줄은 봉인된 태양이 되고, 원 아래로 흐르는 한 줄은 일출이 되며, 원 위에 얹힌 한 줄은 일몰이 된다. 같은 두 부수도 위치가 운명을 가른다."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100">' +
+      '<circle cx="50" cy="50" r="28" stroke="rgba(255,255,255,0.5)" stroke-width="3" fill="none"/>' +
+      '<line x1="15" y1="50" x2="85" y2="50" stroke="rgba(255,170,0,0.9)" stroke-width="3"/>' +
+      '</svg>'
   }
 ];
 
@@ -240,6 +259,7 @@ function clearCanvas() {
   state.resonance = 0;
   state.heat = 0;
   state.instability = 0;
+  state.currentCompound = null;
   updateAnalyzerUI();
 }
 
@@ -259,6 +279,7 @@ function undoLastStroke() {
     state.overloaded = false;
     state.currentMeaning = '';
     state.currentDynamics = '';
+    state.currentCompound = null;
     systemStatus.innerText = '대기 중...';
     systemStatus.style.color = '#fff';
     btnCastMagic.style.display = 'none';
@@ -496,6 +517,7 @@ function analyzeCurrentState() {
 
   state.currentMeaning = analysis.meaning;
   state.currentDynamics = analysis.dynamics;
+  state.currentCompound = analysis.compoundName || null;
 
   updateAnalyzerUI();
 }
@@ -506,10 +528,21 @@ function updateAnalyzerUI() {
   valInstability.innerText = state.instability.toFixed(0) + '%';
   
   
+  // Compound runes — positional radical combinations like 열기△ + 대지ㅡ → 마그마 —
+  // get a distinct gold tint and a 결합 label so the player learns to read them as
+  // something different from a plain template match. Falls back to the regular
+  // teal/purple/red flow when no compound is active.
+  const compoundColor = '#ffaa00';
   if (state.instability > 80) {
     systemStatus.innerText = `[경고] 붕괴 임박! (${state.currentMeaning})`;
     systemStatus.style.color = '#ff3366';
     btnCastMagic.style.display = 'none';
+  } else if (state.currentCompound) {
+    const cast = state.resonance > 30 && runeStrokesCount() > 0;
+    const prefix = cast ? '결합 발현' : '결합 감지';
+    systemStatus.innerText = `${prefix}: ${state.currentCompound} - ${state.currentDynamics}`;
+    systemStatus.style.color = compoundColor;
+    btnCastMagic.style.display = cast ? 'block' : 'none';
   } else if (state.resonance > 30 && runeStrokesCount() > 0) {
     systemStatus.innerText = `발현 중: ${state.currentMeaning} - ${state.currentDynamics}`;
     systemStatus.style.color = '#8a2be2';
