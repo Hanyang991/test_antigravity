@@ -64,6 +64,61 @@ const RAW_TEMPLATES = [
             }
             return [pts];
         })()
+    },
+    {
+        name: '케나즈(<)', // Kenaz: open angle pointing right (torch)
+        strokes: [
+            [{x: 100, y: 0},  {x: 0, y: 50}],
+            [{x: 0,   y: 50}, {x: 100, y: 100}]
+        ]
+    },
+    {
+        name: '하갈라즈(H)', // Hagalaz: H shape (hail)
+        strokes: [
+            [{x: 0,   y: 0}, {x: 0,   y: 100}], // left vertical
+            [{x: 100, y: 0}, {x: 100, y: 100}], // right vertical
+            [{x: 0,  y: 50}, {x: 100, y: 50}]   // crossbar
+        ]
+    },
+    {
+        name: '에와즈(M)', // Ehwaz: M shape (horse / passage)
+        strokes: [
+            [{x: 0,   y: 100}, {x: 0,   y: 0}],   // left vertical (up)
+            [{x: 0,   y: 0},   {x: 50,  y: 100}], // down to middle valley
+            [{x: 50,  y: 100}, {x: 100, y: 0}],   // up to right peak
+            [{x: 100, y: 0},   {x: 100, y: 100}]  // right vertical (down)
+        ]
+    },
+    {
+        name: '열기(△)', // Heat / fire (open triangle radical from README)
+        strokes: [
+            [{x: 50,  y: 0},   {x: 0,   y: 100}],
+            [{x: 0,   y: 100}, {x: 100, y: 100}],
+            [{x: 100, y: 100}, {x: 50,  y: 0}]
+        ]
+    },
+    {
+        name: '다가즈(◇)', // Dagaz: diamond (day / dawn)
+        strokes: [
+            [{x: 50,  y: 0},   {x: 100, y: 50}],
+            [{x: 100, y: 50},  {x: 50,  y: 100}],
+            [{x: 50,  y: 100}, {x: 0,   y: 50}],
+            [{x: 0,   y: 50},  {x: 50,  y: 0}]
+        ]
+    },
+    {
+        name: '나우디즈(+)', // Naudhiz: cross / need
+        strokes: [
+            [{x: 50, y: 0}, {x: 50, y: 100}],
+            [{x: 0, y: 50}, {x: 100, y: 50}]
+        ]
+    },
+    {
+        name: '라구즈(L)', // Laguz: L shape (water / flow)
+        strokes: [
+            [{x: 0, y: 0},   {x: 0,   y: 100}],
+            [{x: 0, y: 100}, {x: 100, y: 100}]
+        ]
     }
 ];
 

@@ -53,21 +53,80 @@ const btnAssistRuler = document.getElementById('btn-assist-ruler');
 const btnAssistCompass = document.getElementById('btn-assist-compass');
 
 // Archive Data
+const RUNE_STROKE = 'rgba(255,255,255,0.5)';
+const RUNE_W = 3;
+function lineSvg(segments) {
+  const lines = segments.map(([x1, y1, x2, y2]) =>
+    `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${RUNE_STROKE}" stroke-width="${RUNE_W}"/>`
+  ).join('');
+  return `<svg width="100" height="100" viewBox="0 0 100 100">${lines}</svg>`;
+}
+
 const archives = [
   {
     id: 1,
     lore: '"투창은 흔들림 없이 솟구쳐야 한다. 수직선(기둥)을 세우고 양옆으로 날카로운 사선(가지)을 뻗어 티와즈(↑)의 맹렬함을 일깨워라."',
-    svg: '<svg width="100" height="100" viewBox="0 0 100 100"><line x1="50" y1="90" x2="50" y2="10" stroke="rgba(255,255,255,0.5)" stroke-width="3"/><line x1="50" y1="10" x2="20" y2="40" stroke="rgba(255,255,255,0.5)" stroke-width="3"/><line x1="50" y1="10" x2="80" y2="40" stroke="rgba(255,255,255,0.5)" stroke-width="3"/></svg>'
+    svg: lineSvg([[50,90,50,10],[50,10,20,40],[50,10,80,40]])
   },
   {
     id: 2,
     lore: '"수호와 방벽의 룬 알기즈(Y). 기둥을 세우되 가지는 중간에서 위로 향하게 하라. 생명력을 감싸안는 형태가 될 것이다."',
-    svg: '<svg width="100" height="100" viewBox="0 0 100 100"><line x1="50" y1="90" x2="50" y2="50" stroke="rgba(255,255,255,0.5)" stroke-width="3"/><line x1="50" y1="50" x2="20" y2="10" stroke="rgba(255,255,255,0.5)" stroke-width="3"/><line x1="50" y1="50" x2="80" y2="10" stroke="rgba(255,255,255,0.5)" stroke-width="3"/></svg>'
+    svg: lineSvg([[50,90,50,50],[50,50,20,10],[50,50,80,10]])
   },
   {
     id: 3,
     lore: '"두 룬의 기둥을 하나로 합쳐라. 교환을 상징하는 게보(X)와 얼음의 이사(|)가 만나면 폭풍이 몰아치리라."',
     svg: '<svg width="100" height="100" viewBox="0 0 100 100"><line x1="50" y1="10" x2="50" y2="90" stroke="rgba(0,255,255,0.8)" stroke-width="3"/><line x1="20" y1="20" x2="80" y2="80" stroke="rgba(255,51,102,0.8)" stroke-width="3"/><line x1="80" y1="20" x2="20" y2="80" stroke="rgba(255,51,102,0.8)" stroke-width="3"/></svg>'
+  },
+  {
+    id: 4,
+    lore: '"얼음의 이사(|). 한 줄기 곧은 수직선을 그어라. 흐름을 멈추고 세상을 응결시킬 것이다."',
+    svg: lineSvg([[50,10,50,90]])
+  },
+  {
+    id: 5,
+    lore: '"대지(ㅡ)의 룬은 가로로 단단히 뻗어야 한다. 수평선 한 줄로 발판을 세우라."',
+    svg: lineSvg([[10,50,90,50]])
+  },
+  {
+    id: 6,
+    lore: '"태양의 원(○)은 끊김 없는 한 호다. 컴퍼스로 닫힌 고리를 그려 빛의 순환을 봉인하라."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100"><circle cx="50" cy="50" r="38" stroke="rgba(255,255,255,0.5)" stroke-width="3" fill="none"/></svg>'
+  },
+  {
+    id: 7,
+    lore: '"횃불의 케나즈(<). 한 점에서 두 빗금이 양옆으로 갈라져 빛을 토해내게 하라."',
+    svg: lineSvg([[80,15,20,50],[20,50,80,85]])
+  },
+  {
+    id: 8,
+    lore: '"우박의 하갈라즈(H). 두 기둥 사이를 한 줄로 묶어라. 자연의 무자비한 균열을 부르리라."',
+    svg: lineSvg([[15,15,15,85],[85,15,85,85],[15,50,85,50]])
+  },
+  {
+    id: 9,
+    lore: '"통로의 에와즈(M). 두 기둥과 그 사이의 골짜기로 이어지는 길을 새겨라. 무엇이든 지나갈 수 있다."',
+    svg: lineSvg([[15,85,15,15],[15,15,50,85],[50,85,85,15],[85,15,85,85]])
+  },
+  {
+    id: 10,
+    lore: '"열기(△)의 부수. 세 빗금으로 뾰족한 봉우리를 만들어라. 다른 룬과 겹치면 새로운 권능이 깃든다."',
+    svg: lineSvg([[50,15,15,85],[15,85,85,85],[85,85,50,15]])
+  },
+  {
+    id: 11,
+    lore: '"새벽의 다가즈(◇). 네 변의 마름모를 닫아 어둠과 빛이 교차하는 문을 열어라."',
+    svg: lineSvg([[50,15,85,50],[85,50,50,85],[50,85,15,50],[15,50,50,15]])
+  },
+  {
+    id: 12,
+    lore: '"필요의 나우디즈(+). 수직과 수평이 정확히 교차해야 한다. 두 줄기가 만나는 그곳에 결핍을 못박아라."',
+    svg: lineSvg([[50,15,50,85],[15,50,85,50]])
+  },
+  {
+    id: 13,
+    lore: '"흐름의 라구즈(L). 곧추선 기둥을 세우고 발치에서 가로로 흘려보내라. 물이 향하는 길을 일러줄 것이다."',
+    svg: lineSvg([[15,15,15,85],[15,85,85,85]])
   }
 ];
 
@@ -117,7 +176,7 @@ function changeArchive(dir) {
 
 function updateArchiveUI() {
   const doc = archives[currentArchiveIndex];
-  archiveBadge.innerText = `문서 #0${doc.id}`;
+  archiveBadge.innerText = `문서 #${String(doc.id).padStart(2, '0')}`;
   archiveText.innerText = doc.lore;
   archiveSketch.innerHTML = doc.svg;
 }
