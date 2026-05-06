@@ -707,44 +707,57 @@ function renderLoop() {
 // Particle main-unit derivation (RUNE_DICTIONARY §11.2 integration).
 //
 // The upstream pipelines (recognition.js + arrangement.js + sentence.js)
-// classify any stroke that recognizes as a rune into its own main unit.
-// That makes it impossible for a clean small bar/dot near a larger rune to
-// fire as a particle (it always becomes its own main rune instead).
+// classify any stroke that recognizes as a rune into its own main unit and
+// merge by spatial proximity, which causes two failure modes for particles:
 //
-// This helper re-clusters the rune strokes and uses **relative cluster size**
-// to pick which clusters are "main" and which are "particle candidates":
+//   (A) A clean small bar drawn *next to* a larger rune is recognized as
+//       its own main rune (e.g. 이사) and gets claimed → never fires as
+//       a particle.
+//   (B) A small bar drawn *through* a larger rune physically overlaps
+//       with it, so proximity clustering merges them into one cluster
+//       and arrangement detects a §2 compound. Particles never fire on
+//       the inner stroke either.
 //
-//   - 1 cluster only            → that's the main rune; no particles can fire.
-//   - 2+ clusters, dominant one → only the largest is main; the rest are
-//                                 particle candidates (regardless of whether
-//                                 they individually identify as runes).
-//   - 2+ clusters, no dominance → all are main runes (multi-rune sentence);
-//                                 fall back to sentence.mainUnits / arrangement.
+// This helper handles both by:
 //
-// "Dominance" is bbox-area ratio: a cluster qualifies as main only if its
-// bbox area is >= 30% of the largest cluster's. This intentionally treats
-// even-shaped second clusters as real runes (so e.g. T1 circle + a second
-// circle still produces a multi-rune sentence) while letting small ancillary
-// strokes (verticals/dots/short bars) fire as particles.
+//   1. Run the standard proximity clustering as a coarse pass.
+//   2. Within each cluster, decompose by *structural endpoint connectivity*
+//      — strokes that share an endpoint within a tolerance are part of the
+//      same structural group (e.g. △'s three edges); strokes that don't are
+//      separate groups (e.g. a ㅡ drawn through △ doesn't share endpoints
+//      with the triangle, so it splits out).
+//   3. Compare group sizes: only groups whose bbox area is ≥30% of the
+//      largest group's area count as "main"; smaller groups are particle
+//      candidates regardless of whether they individually identify as runes.
+//   4. When all groups are comparable size (genuine multi-rune sentence)
+//      defer to sentence.mainUnits / arrangement.units so connector
+//      classification is preserved.
 function derivePerticleMainUnits({ runeStrokes, arrangement, sentence }) {
   if (!runeStrokes || runeStrokes.length === 0) return [];
   const clusters = clusterStrokesByProximity(runeStrokes);
   if (!clusters || clusters.length === 0) return [];
 
-  // Compute bbox + size for each cluster.
-  const sized = clusters.map(cluster => {
-    const bb = bboxOfStrokes(cluster);
-    // Use max(w*h, perimeter) — perimeter handles 1D runes (e.g. 이사 has
-    // bbox.w ≈ 0). bbox area alone would treat them as zero-sized.
+  // Decompose each proximity cluster by structural endpoint connectivity
+  // so a stroke that physically overlaps a main rune but doesn't share any
+  // endpoint with it (e.g. ㅡ drawn through ○) becomes its own group.
+  const groups = [];
+  for (const cluster of clusters) {
+    for (const g of decomposeByEndpointConnectivity(cluster)) groups.push(g);
+  }
+
+  // Compute bbox + size for each group. Use max(w,1)*max(h,1) instead of
+  // raw bbox area so 1D runes (이사 has bbox.w ≈ 0) aren't treated as zero.
+  const sized = groups.map(group => {
+    const bb = bboxOfStrokes(group);
     const area = Math.max(bb.w, 1) * Math.max(bb.h, 1);
-    return { cluster, bb, area };
+    return { group, bb, area };
   });
   sized.sort((a, b) => b.area - a.area);
 
   if (sized.length === 1) {
-    const { cluster, bb } = sized[0];
-    const name = recognizer.identifyRune(cluster) || '복합 룬';
-    return [{ name, bbox: bb, center: { x: bb.cx, y: bb.cy }, strokes: cluster }];
+    const { group, bb } = sized[0];
+    const name = recognizer.identifyRune(group) || '복합 룬';
+    return [{ name, bbox: bb, center: { x: bb.cx, y: bb.cy }, strokes: group }];
   }
 
   const dominantArea = sized[0].area;
@@ -753,7 +766,7 @@ function derivePerticleMainUnits({ runeStrokes, arrangement, sentence }) {
   const mainBuckets = sized.filter(s => s.area >= dominantArea * MAIN_AREA_RATIO);
 
   // If the upstream sentence already produced mainUnits and the dominance
-  // analysis says all clusters are comparable size, prefer sentence.mainUnits
+  // analysis says all groups are comparable size, prefer sentence.mainUnits
   // (it has connector classification).
   if (mainBuckets.length === sized.length) {
     if (sentence && Array.isArray(sentence.mainUnits) && sentence.mainUnits.length > 0) {
@@ -764,12 +777,52 @@ function derivePerticleMainUnits({ runeStrokes, arrangement, sentence }) {
     }
   }
 
-  // Otherwise: only the dominant clusters are main. Smaller ones are
+  // Otherwise: only the dominant groups are main. Smaller ones are
   // particle-sized and therefore NOT claimed → they become candidates.
-  return mainBuckets.map(({ cluster, bb }) => {
-    const name = recognizer.identifyRune(cluster) || '복합 룬';
-    return { name, bbox: bb, center: { x: bb.cx, y: bb.cy }, strokes: cluster };
+  return mainBuckets.map(({ group, bb }) => {
+    const name = recognizer.identifyRune(group) || '복합 룬';
+    return { name, bbox: bb, center: { x: bb.cx, y: bb.cy }, strokes: group };
   });
+}
+
+// Decompose a list of strokes into structurally-connected groups using
+// shared endpoint proximity (within `endpointTol` pixels). Strokes that
+// share at least one endpoint with another stroke transitively form one
+// group. Used inside derivePerticleMainUnits to separate overlapping but
+// structurally-independent strokes (e.g. ㅡ drawn through ○).
+function decomposeByEndpointConnectivity(strokes, endpointTol = 18) {
+  if (!strokes || strokes.length <= 1) return strokes && strokes.length > 0 ? [strokes] : [];
+  const n = strokes.length;
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  const unite = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+  const tol2 = endpointTol * endpointTol;
+  const close = (p, q) => {
+    if (!p || !q) return false;
+    const dx = p.x - q.x, dy = p.y - q.y;
+    return dx * dx + dy * dy <= tol2;
+  };
+  for (let i = 0; i < n; i++) {
+    const sa = strokes[i];
+    if (!sa || sa.length === 0) continue;
+    const aStart = sa[0], aEnd = sa[sa.length - 1];
+    for (let j = i + 1; j < n; j++) {
+      const sb = strokes[j];
+      if (!sb || sb.length === 0) continue;
+      const bStart = sb[0], bEnd = sb[sb.length - 1];
+      if (close(aStart, bStart) || close(aStart, bEnd) ||
+          close(aEnd, bStart)   || close(aEnd, bEnd)) {
+        unite(i, j);
+      }
+    }
+  }
+  const buckets = new Map();
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    if (!buckets.has(r)) buckets.set(r, []);
+    buckets.get(r).push(strokes[i]);
+  }
+  return Array.from(buckets.values());
 }
 
 // Analysis Logic
