@@ -654,6 +654,15 @@ export function analyzeBoneInteraction({ runeStrokes, boneStrokes, boneFirst = f
     const bridge = analyzeBridging({ runeStrokes, boneStrokes });
     if (bridge) return bridge;
 
+    // 0.5. Wrapping (감싸기) early-out — a true spiral that winds ≥ 1.5 full
+    // turns around the rune's center reads as 감싸기 even when its closed-end
+    // shape would otherwise trigger 가두기 below. A 1-turn closed circle stays
+    // 봉인 (Enclosing) because its winding stays under the 1.5-turn threshold;
+    // only multi-turn spirals (which are unambiguously the "wrap" gesture in
+    // the dictionary) take this branch.
+    const spiralWrap = analyzeWrapping({ runeStrokes, boneStrokes });
+    if (spiralWrap && spiralWrap.turns >= 1.5) return spiralWrap;
+
     // 1. Enclosing (가두기) — bone bbox surrounds rune bbox AND bone is a
     // closed/recognizable shape. Highest priority among single-rune kinds
     // because it's the most structurally constrained relationship.
