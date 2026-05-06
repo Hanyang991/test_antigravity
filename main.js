@@ -2,6 +2,7 @@ import './style.css'
 import { RecognitionEngine } from './recognition.js'
 import { analyzeArrangement } from './arrangement.js'
 import { analyzeBoneInteraction } from './bone-interaction.js'
+import { analyzeSentence } from './sentence.js'
 import { RiftGame } from './rift.js'
 
 const recognizer = new RecognitionEngine();
@@ -30,11 +31,19 @@ const state = {
   // instabilityDelta, runeCount} — see arrangement.js.
   arrangement: null,
   // Bone × Rune interaction (RUNE_DICTIONARY §10): how the bone strokes
-  // spatially relate to the rune (가두기 / 걸치기 / 관통 / 받치기 / …) →
-  // additional power multiplier and instability delta independent of §9.
+  // spatially relate to the rune (가두기 / 걸치기 / 관통 / 받치기 /
+  // 연결 / 감싸기) → additional power multiplier and instability delta
+  // independent of §9.
   // {kind, label, detail, shape, powerMul, instabilityDelta}
   // — see bone-interaction.js.
   boneInteraction: null,
+  // Sentence-level grammar (RUNE_DICTIONARY §§11-12): connector runes,
+  // sentence grade (단어/구/절/문장/주문), and reading direction
+  // (투사/흡수/하강/상승/증폭/소멸). Stacks its own powerMul and
+  // instability delta on top of arrangement and bone interaction.
+  // {kind, grade, direction, connectors, mainCount, powerMul, …}
+  // — see sentence.js.
+  sentence: null,
   overloaded: false
 };
 
@@ -72,6 +81,8 @@ const valArrangement = document.getElementById('val-arrangement');
 const arrangementDetail = document.getElementById('arrangement-detail');
 const valBoneInteraction = document.getElementById('val-bone-interaction');
 const boneInteractionDetail = document.getElementById('bone-interaction-detail');
+const valSentence = document.getElementById('val-sentence');
+const sentenceDetail = document.getElementById('sentence-detail');
 const systemStatus = document.getElementById('system-status');
 
 // Archive Elements
@@ -232,6 +243,65 @@ const archives = [
     id: 25,
     lore: '"자연과 정령: 자작나무(B) 아래 물(L)을 흘리면 습지가 생기고, 세계수(ᛇ) 위에 원(○)을 올리면 과실이 맺힌다. 고향(Ω) 위에 방패(Y)를 세우면 조상의 축복이 내린다."',
     svg: '<svg width="100" height="100" viewBox="0 0 100 100"><line x1="25" y1="10" x2="25" y2="60" stroke="rgba(255,255,255,0.5)" stroke-width="3"/><path d="M25,10 Q65,25 25,45" stroke="rgba(255,255,255,0.5)" stroke-width="3" fill="none"/><line x1="15" y1="75" x2="15" y2="90" stroke="rgba(100,200,255,0.8)" stroke-width="3"/><line x1="15" y1="90" x2="50" y2="90" stroke="rgba(100,200,255,0.8)" stroke-width="3"/></svg>'
+  },
+  {
+    id: 26,
+    lore: '"연결(連結)의 부수: 두 룬을 단선(─)으로 잇는 자는 신중히 흐르고, 이중선(═)으로 묶는 자는 양방향으로 분배한다. 삼중선(≡)은 위력 ×1.2, 그러나 불안정성도 함께 솟구친다."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100">' +
+      '<circle cx="20" cy="50" r="12" stroke="rgba(255,255,255,0.5)" stroke-width="2" fill="none"/>' +
+      '<circle cx="80" cy="50" r="12" stroke="rgba(255,255,255,0.5)" stroke-width="2" fill="none"/>' +
+      '<line x1="32" y1="44" x2="68" y2="44" stroke="rgba(255,170,0,0.9)" stroke-width="2"/>' +
+      '<line x1="32" y1="50" x2="68" y2="50" stroke="rgba(255,170,0,0.9)" stroke-width="2"/>' +
+      '<line x1="32" y1="56" x2="68" y2="56" stroke="rgba(255,170,0,0.9)" stroke-width="2"/>' +
+      '</svg>'
+  },
+  {
+    id: 27,
+    lore: '"흐름의 변주: 점선(···)은 위력을 ½로 줄이지만 불안정을 가라앉히고, 파선(- -)은 더 깊이 안정시킨다. 물결선(~)은 ×1.5 폭발, 나선(⌀)은 ×2.0 거대 폭발 — 위력은 두려운 만큼 대가가 따른다."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100">' +
+      '<circle cx="20" cy="30" r="9" stroke="rgba(255,255,255,0.5)" stroke-width="2" fill="none"/>' +
+      '<circle cx="80" cy="30" r="9" stroke="rgba(255,255,255,0.5)" stroke-width="2" fill="none"/>' +
+      '<path d="M30,30 Q40,18 50,30 T70,30" stroke="rgba(255,170,0,0.9)" stroke-width="2" fill="none"/>' +
+      '<circle cx="20" cy="75" r="9" stroke="rgba(255,255,255,0.5)" stroke-width="2" fill="none"/>' +
+      '<circle cx="80" cy="75" r="9" stroke="rgba(255,255,255,0.5)" stroke-width="2" fill="none"/>' +
+      '<path d="M30,75 C45,60 55,90 70,75" stroke="rgba(255,100,200,0.9)" stroke-width="2" fill="none"/>' +
+      '</svg>'
+  },
+  {
+    id: 28,
+    lore: '"감싸기의 술식: 단 한 개의 뼈대 곡선이 룬의 중심 둘레를 1.5바퀴 이상 돌면 \'감싸기\'가 된다. 한 바퀴마다 위력이 깊어져 다섯 바퀴면 ×2.7에 달한다. 그러나 회전이 깊을수록 안정성은 위태로워진다."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100">' +
+      '<circle cx="50" cy="50" r="14" stroke="rgba(255,255,255,0.5)" stroke-width="2" fill="none"/>' +
+      '<path d="M50,30 A22,22 0 1,1 28,52 A18,18 0 1,1 70,50 A14,14 0 1,1 50,36" stroke="rgba(255,170,0,0.9)" stroke-width="2" fill="none"/>' +
+      '</svg>'
+  },
+  {
+    id: 29,
+    lore: '"문장의 등급: 룬 하나는 \'단어\', 둘은 \'구\', 셋이면 \'절\'(불안정 +15), 넷이면 \'문장\'(+30), 다섯 이상이면 \'주문\'(+50)이 된다. 등급이 깊을수록 위력은 솟지만 손에서 벗어나기 쉽다."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100">' +
+      '<text x="50" y="32" font-size="11" fill="rgba(255,255,255,0.7)" text-anchor="middle">단어 · 구</text>' +
+      '<text x="50" y="52" font-size="11" fill="rgba(255,170,0,0.9)" text-anchor="middle">절 · 문장</text>' +
+      '<text x="50" y="74" font-size="11" fill="rgba(255,80,80,0.9)" text-anchor="middle">주문</text>' +
+      '</svg>'
+  },
+  {
+    id: 30,
+    lore: '"읽는 방향이 곧 의도다. 왼→오는 투사(공격), 오→왼은 흡수(방어). 위→아래는 하강·접지, 아래→위는 상승·강화. 시계방향 원형은 증폭, 반시계는 소멸이 된다. 같은 룬도 방향이 바뀌면 운명이 갈린다."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100">' +
+      '<polyline points="20,50 80,50" stroke="rgba(255,170,0,0.9)" stroke-width="2" fill="none"/>' +
+      '<polyline points="76,46 80,50 76,54" stroke="rgba(255,170,0,0.9)" stroke-width="2" fill="none"/>' +
+      '<path d="M50,50 m-25,0 a25,25 0 1,1 50,0 a25,25 0 1,1 -50,0" stroke="rgba(100,200,255,0.4)" stroke-width="2" fill="none"/>' +
+      '<polyline points="71,32 75,30 73,26" stroke="rgba(100,200,255,0.7)" stroke-width="2" fill="none"/>' +
+      '</svg>'
+  },
+  {
+    id: 31,
+    lore: '"접속사 룬은 두 메인 룬 사이에 작게 그어지면 자체 마법을 발동하지 않고 문법이 된다. 대지(ㅡ)=병렬, 이사(|)=순차, 게보(X)=변환, 나우디즈(+)=속박, 케나즈(<)=지향, 다가즈(◇)=전환. 작아야 하고, 두 룬 사이에 있어야 한다."',
+    svg: '<svg width="100" height="100" viewBox="0 0 100 100">' +
+      '<polygon points="20,20 30,50 10,50" stroke="rgba(255,255,255,0.5)" stroke-width="2" fill="none"/>' +
+      '<line x1="40" y1="50" x2="60" y2="50" stroke="rgba(255,170,0,0.9)" stroke-width="2"/>' +
+      '<polyline points="70,20 70,50 90,20 90,50" stroke="rgba(255,255,255,0.5)" stroke-width="2" fill="none"/>' +
+      '</svg>'
   }
 ];
 
@@ -323,12 +393,14 @@ function castMagic() {
         meaning: state.currentMeaning,
         compoundName: state.currentCompound,
       }),
-      // Pass the current arrangement (RUNE_DICTIONARY §9) and bone interaction
-      // (§10) so rift.cast() can scale reward + threat relief by their combined
-      // powerMul. 단일 룬 / 단순 뼈대 (kind='none') collapse to ×1.0 inside
-      // cast() so no special-casing here.
+      // Pass the current arrangement (RUNE_DICTIONARY §9), bone interaction
+      // (§10), and sentence grammar (§§11-12) so rift.cast() can scale reward
+      // + threat relief by their combined powerMul. 단일 룬 / 단순 뼈대 /
+      // 단어 (kind='none' or 'word') collapse to ×1.0 inside cast() so no
+      // special-casing here.
       arrangement: state.arrangement,
       boneInteraction: state.boneInteraction,
+      sentence: state.sentence,
     });
     if (judged.result === 'success') {
       ctx.fillStyle = 'rgba(0, 255, 153, 0.45)';
@@ -421,6 +493,12 @@ function clearCanvas() {
   state.heat = 0;
   state.instability = 0;
   state.currentCompound = null;
+  // Reset the §9/§10/§11-12 analyzer outputs too so the panels collapse to
+  // their empty state ('단일 룬' / '단순 뼈대' / '--') immediately on Clear
+  // instead of carrying over stale values from the previous canvas.
+  state.arrangement = null;
+  state.boneInteraction = null;
+  state.sentence = null;
   updateAnalyzerUI();
 }
 
@@ -441,6 +519,9 @@ function undoLastStroke() {
     state.currentMeaning = '';
     state.currentDynamics = '';
     state.currentCompound = null;
+    state.arrangement = null;
+    state.boneInteraction = null;
+    state.sentence = null;
     systemStatus.innerText = '대기 중...';
     systemStatus.style.color = '#fff';
     btnCastMagic.style.display = 'none';
@@ -651,6 +732,18 @@ function analyzeCurrentState() {
   });
   state.boneInteraction = boneInteraction;
 
+  // Sentence-level grammar (RUNE_DICTIONARY §§11-12). Reuses the arrangement's
+  // identified rune units to classify connector runes (대지/이사/게보/+/</+/◇),
+  // sentence grade by main-rune count, and reading direction. Stacks its own
+  // powerMul × instabilityDelta on top of arrangement and bone interaction.
+  const sentence = analyzeSentence({
+    runeStrokes,
+    recognizer,
+    arrangement,
+    boneInteraction,
+  });
+  state.sentence = sentence;
+
   // Thermodynamics: Volume (V) = Area of Bones
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   boneStrokes.forEach(stroke => {
@@ -707,10 +800,16 @@ function analyzeCurrentState() {
   // Arrangement instability delta stacks on top of single-rune + compound
   // bonuses. Triangular 균형 / 대칭 배열 lower it; radial / 원형 / 삼중 강화
   // raise it. Bone interaction (§10) stacks too — 결계 (square enclosing)
-  // lowers, 십자 걸치기 / 공명 raise. All clamped to [0, 100].
+  // lowers, 십자 걸치기 / 공명 raise. Sentence grade (§12) adds another delta
+  // — 절 +15, 문장 +30, 주문 +50 (all reflect higher-grade spells being more
+  // unstable). All clamped to [0, 100].
   const arrangementDelta = (state.arrangement && state.arrangement.instabilityDelta) || 0;
   const boneInteractionDelta = (state.boneInteraction && state.boneInteraction.instabilityDelta) || 0;
-  state.instability = Math.max(Math.min(baseInstability + analysis.instabilityModifier + arrangementDelta + boneInteractionDelta, 100), 0);
+  const sentenceDelta = (state.sentence && state.sentence.instabilityDelta) || 0;
+  state.instability = Math.max(Math.min(
+    baseInstability + analysis.instabilityModifier
+      + arrangementDelta + boneInteractionDelta + sentenceDelta,
+    100), 0);
 
   // Overload reflects whether the current stroke set exceeds limits. Recompute
   // every analysis so removing a stroke (Undo) or pure clear can take the canvas
@@ -774,7 +873,33 @@ function updateAnalyzerUI() {
     }
   }
 
-  
+  // Sentence panel (RUNE_DICTIONARY §§11-12). Shows the sentence grade
+  // (단어/구/절/문장/주문) plus reading direction and any active connector
+  // particles. Color convention: 주문 (×1.5+) gold, 절/문장 cyan-cool when
+  // direction is 흡수/소멸 (defensive), gray otherwise. 단어 collapses to
+  // a muted "--" so it doesn't compete with the other panels.
+  if (valSentence && sentenceDetail) {
+    const s = state.sentence;
+    if (s && s.kind === 'sentence') {
+      const mul = s.powerMul.toFixed(1);
+      valSentence.innerText = `${s.label} ×${mul}`;
+      sentenceDetail.innerText = s.detail || '';
+      sentenceDetail.style.display = s.detail ? 'block' : 'none';
+      if (s.powerMul >= 1.5) valSentence.style.color = '#ffaa00';
+      else if (s.directionKey === 'rightToLeft' ||
+               s.directionKey === 'counterClockwise') {
+        valSentence.style.color = '#5fdfff';
+      } else {
+        valSentence.style.color = '#cccccc';
+      }
+    } else {
+      valSentence.innerText = '--';
+      valSentence.style.color = '#666666';
+      sentenceDetail.innerText = '';
+      sentenceDetail.style.display = 'none';
+    }
+  }
+
   // Compound runes — positional radical combinations like 열기△ + 대지ㅡ → 마그마 —
   // get a distinct gold tint and a 결합 label so the player learns to read them as
   // something different from a plain template match. Falls back to the regular

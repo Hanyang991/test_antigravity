@@ -172,11 +172,13 @@ export class RiftGame {
 
     // Called when the user clicks Cast. `analysis` is the recognizer output for
     // the current canvas: { meaning, compoundName, arrangement, boneInteraction,
-    // ... }. Returns a result object so main.js can play a corresponding visual
-    // cue. When the analyzer reports a non-trivial arrangement (§9) and/or
-    // bone interaction (§10), their powerMuls multiply together and scale both
-    // score reward and threat relief — so a bone-triangle 삼중 강화 (×2.0)
-    // inside a rhombus 공명 (×1.8) hits 3.6× as hard as a plain solo cast.
+    // sentence, ... }. Returns a result object so main.js can play a
+    // corresponding visual cue. When the analyzer reports a non-trivial
+    // arrangement (§9), bone interaction (§10), and/or sentence grade
+    // (§§11-12), their powerMuls multiply together and scale both score
+    // reward and threat relief — so a bone-triangle 삼중 강화 (×2.0) inside a
+    // rhombus 공명 (×1.8) on a 절 sentence (×1.1) hits 3.96× as hard as a
+    // plain solo cast.
     cast(analysis) {
         if (this.status !== 'active' || !this.demand) {
             return { result: 'idle' };
@@ -185,9 +187,11 @@ export class RiftGame {
         const matched = this._matches(analysis, this.demand);
         const arr = analysis && analysis.arrangement;
         const bone = analysis && analysis.boneInteraction;
+        const sentence = analysis && analysis.sentence;
         const arrMul = (arr && typeof arr.powerMul === 'number') ? arr.powerMul : 1.0;
         const boneMul = (bone && typeof bone.powerMul === 'number') ? bone.powerMul : 1.0;
-        const powerMul = arrMul * boneMul;
+        const sentMul = (sentence && typeof sentence.powerMul === 'number') ? sentence.powerMul : 1.0;
+        const powerMul = arrMul * boneMul * sentMul;
         if (matched) {
             const level = levelFor(this.score);
             const isCompound = this.demand.compound === true;
@@ -198,8 +202,8 @@ export class RiftGame {
             this.score += totalReward;
             this.threat = Math.max(0, this.threat - totalRelief);
             // Build a single bonus tag listing each contributor that's not ×1.0,
-            // so the player sees what scaled the cast (and how the two systems
-            // interacted): "[삼각 배열 ×2.0 · 공명 ×1.8]".
+            // so the player sees what scaled the cast (and how the systems
+            // interacted): "[삼각 배열 ×2.0 · 공명 ×1.8 · 절 ×1.1]".
             const tags = [];
             if (arr && arr.kind && arr.kind !== 'none' && arrMul !== 1.0) {
                 tags.push(`${arr.label} ×${arrMul.toFixed(1)}`);
@@ -207,6 +211,9 @@ export class RiftGame {
             if (bone && bone.kind && bone.kind !== 'none' && boneMul !== 1.0) {
                 const detail = bone.detail ? ` ${bone.detail}` : '';
                 tags.push(`${bone.label}${detail} ×${boneMul.toFixed(1)}`);
+            }
+            if (sentence && sentence.kind === 'sentence' && sentMul !== 1.0) {
+                tags.push(`${sentence.label} ×${sentMul.toFixed(1)}`);
             }
             const bonus = tags.length > 0 ? ` [${tags.join(' · ')}]` : '';
             this.message = `${this.demand.label} 봉합 성공!${bonus} +${totalReward}점`;
