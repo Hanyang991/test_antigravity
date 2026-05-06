@@ -1,10 +1,12 @@
 import './style.css'
-import { RecognitionEngine } from './recognition.js'
+import { RecognitionEngine, __INTERNAL__ as RECOGNITION_INTERNAL } from './recognition.js'
 import { analyzeArrangement } from './arrangement.js'
 import { analyzeBoneInteraction } from './bone-interaction.js'
 import { analyzeSentence } from './sentence.js'
 import { analyzeParticles } from './particles.js'
 import { RiftGame } from './rift.js'
+
+const { bboxOfStrokes, clusterStrokesByProximity } = RECOGNITION_INTERNAL;
 
 const recognizer = new RecognitionEngine();
 const riftGame = new RiftGame();
@@ -702,6 +704,74 @@ function renderLoop() {
   requestAnimationFrame(renderLoop);
 }
 
+// Particle main-unit derivation (RUNE_DICTIONARY §11.2 integration).
+//
+// The upstream pipelines (recognition.js + arrangement.js + sentence.js)
+// classify any stroke that recognizes as a rune into its own main unit.
+// That makes it impossible for a clean small bar/dot near a larger rune to
+// fire as a particle (it always becomes its own main rune instead).
+//
+// This helper re-clusters the rune strokes and uses **relative cluster size**
+// to pick which clusters are "main" and which are "particle candidates":
+//
+//   - 1 cluster only            → that's the main rune; no particles can fire.
+//   - 2+ clusters, dominant one → only the largest is main; the rest are
+//                                 particle candidates (regardless of whether
+//                                 they individually identify as runes).
+//   - 2+ clusters, no dominance → all are main runes (multi-rune sentence);
+//                                 fall back to sentence.mainUnits / arrangement.
+//
+// "Dominance" is bbox-area ratio: a cluster qualifies as main only if its
+// bbox area is >= 30% of the largest cluster's. This intentionally treats
+// even-shaped second clusters as real runes (so e.g. T1 circle + a second
+// circle still produces a multi-rune sentence) while letting small ancillary
+// strokes (verticals/dots/short bars) fire as particles.
+function derivePerticleMainUnits({ runeStrokes, arrangement, sentence }) {
+  if (!runeStrokes || runeStrokes.length === 0) return [];
+  const clusters = clusterStrokesByProximity(runeStrokes);
+  if (!clusters || clusters.length === 0) return [];
+
+  // Compute bbox + size for each cluster.
+  const sized = clusters.map(cluster => {
+    const bb = bboxOfStrokes(cluster);
+    // Use max(w*h, perimeter) — perimeter handles 1D runes (e.g. 이사 has
+    // bbox.w ≈ 0). bbox area alone would treat them as zero-sized.
+    const area = Math.max(bb.w, 1) * Math.max(bb.h, 1);
+    return { cluster, bb, area };
+  });
+  sized.sort((a, b) => b.area - a.area);
+
+  if (sized.length === 1) {
+    const { cluster, bb } = sized[0];
+    const name = recognizer.identifyRune(cluster) || '복합 룬';
+    return [{ name, bbox: bb, center: { x: bb.cx, y: bb.cy }, strokes: cluster }];
+  }
+
+  const dominantArea = sized[0].area;
+  const MAIN_AREA_RATIO = 0.30;
+
+  const mainBuckets = sized.filter(s => s.area >= dominantArea * MAIN_AREA_RATIO);
+
+  // If the upstream sentence already produced mainUnits and the dominance
+  // analysis says all clusters are comparable size, prefer sentence.mainUnits
+  // (it has connector classification).
+  if (mainBuckets.length === sized.length) {
+    if (sentence && Array.isArray(sentence.mainUnits) && sentence.mainUnits.length > 0) {
+      return sentence.mainUnits;
+    }
+    if (arrangement && Array.isArray(arrangement.units) && arrangement.units.length > 0) {
+      return arrangement.units;
+    }
+  }
+
+  // Otherwise: only the dominant clusters are main. Smaller ones are
+  // particle-sized and therefore NOT claimed → they become candidates.
+  return mainBuckets.map(({ cluster, bb }) => {
+    const name = recognizer.identifyRune(cluster) || '복합 룬';
+    return { name, bbox: bb, center: { x: bb.cx, y: bb.cy }, strokes: cluster };
+  });
+}
+
 // Analysis Logic
 function analyzeCurrentState() {
   const allStrokes = [...state.strokes];
@@ -757,17 +827,26 @@ function analyzeCurrentState() {
   });
   state.sentence = sentence;
 
-  // Particle system (RUNE_DICTIONARY §11.2). Reuses the sentence's
-  // mainUnits (excludes connector runes) so a small stroke "between" two
-  // main runes never accidentally counts as a particle on either of them.
-  // Stacks with arrangement / bone / sentence multiplicatively. By design
-  // also stacks with §2 radical compounds (no exclusion logic) so the
-  // same drawing yields different cast behavior depending on which layer
-  // the player optimizes around.
-  const particleMainUnits = (sentence && Array.isArray(sentence.mainUnits)
-                              && sentence.mainUnits.length > 0)
-    ? sentence.mainUnits
-    : (arrangement && Array.isArray(arrangement.units) ? arrangement.units : []);
+  // Particle system (RUNE_DICTIONARY §11.2). Stacks with arrangement /
+  // bone / sentence multiplicatively. By design also stacks with §2
+  // radical compounds (no exclusion logic) so the same drawing yields
+  // different cast behavior depending on which layer the player
+  // optimizes around.
+  //
+  // Main-unit derivation (intentionally NOT just `arrangement.units` /
+  // `sentence.mainUnits`): the upstream pipelines aggressively claim any
+  // recognizable stroke as a separate main rune (e.g. a clean vertical
+  // bar near a circle becomes 이사, blocking it from firing as 강화
+  // particle). Instead we re-cluster the rune strokes and treat clusters
+  // that are significantly smaller than the largest one as
+  // particle candidates regardless of whether they individually
+  // identify as runes. This is what unlocks 강화/극대/부정 etc. on real
+  // hand drawings.
+  const particleMainUnits = derivePerticleMainUnits({
+    runeStrokes,
+    arrangement,
+    sentence,
+  });
   const particles = analyzeParticles({
     runeStrokes,
     mainUnits: particleMainUnits,
