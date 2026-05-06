@@ -25,7 +25,7 @@
 | §11.2 조사 (격조사/강도부사/시제/부정) | DONE | `particles.js` (PR #11) — §2 부수와 의도적 동시 발화 |
 | §12 문장 등급 / 읽기 방향 / 패턴 매칭 | DONE | `sentence.js` (PR #9) |
 | 직선자 첫 클릭 OVERLOAD 버그 | FIXED | PR #12 |
-| **M0 저장소 정리** | TODO | `.gitignore`, `venv/` 제거, README 갱신 |
+| **M0 저장소 정리** | DONE | `.gitignore` 보강, `dist/` 추적 해제, README 파일 표 + 진행 상태 섹션 (PR #14) |
 | **M1 gameState + saveLoad + eventBus** | TODO | 핵심 인프라. 전부 새 파일 |
 | **M2 magicPipeline 분리** | TODO | `main.js`의 분석 로직을 한 함수로 모은다 |
 | **M3 boneInteraction 리네임 + 통합** | PARTIAL | 이미 `bone-interaction.js`에 거의 다 있음. 인수인계서가 요구하는 파일명(`boneInteraction.js`/`connectorLine.js` 분리)으로 정리하고 새 파이프라인에 연결만 하면 됨 |
@@ -42,21 +42,20 @@
 
 ---
 
-### M0. 저장소 정리
+### M0. 저장소 정리 — DONE (PR #14)
 
-**상태**: TODO  
+**상태**: DONE  
 **인수인계서**: §199~215  
-**예상 PR 크기**: 작음 (1~3 파일)
 
-작업:
+작업 결과:
 
-- [ ] `.gitignore`에 `venv/`, `node_modules/`, `dist/`, `.vite/` 명시 (현재 `dist/`는 추적되고 있어 별도 정리 필요)
-- [ ] 만약 `venv/`가 이미 추적된 경우 `git rm -r --cached venv/`로 별도 커밋
-- [ ] `dist/`를 git에서 제거 (`git rm -r --cached dist/`) — 빌드 산출물은 커밋 대상이 아님
-- [ ] README.md에 다음을 명시: 프로젝트 개요, `npm install` / `npm run dev` / `npm run build`, 파일별 역할 (이 문서의 "현재 진행 상태" 표 참고)
-- [ ] 핵심 파일(main.js, recognition.js 등) 상단 주석 정리 — 각 파일이 무엇을 export하는지
+- [x] `.gitignore`에 `.vite/` 추가, Devin 세션 산출물 (`test-plan.md`, `test-report.md`, `test-screenshots/`) 무시 패턴 추가. `venv/` / `node_modules/` / `dist/`는 이미 있었음.
+- [x] `dist/`를 git에서 제거 (`git rm -r --cached dist/`) — 빌드 산출물은 커밋 대상이 아님.
+- [x] `venv/`는 추적된 적 없어 추가 작업 불필요.
+- [x] README.md에 "주요 파일 구성" 표 + "구현 진행 상태" 섹션 추가 (todo.md 참조 링크).
+- [x] `main.js` 상단 모듈 헤더 주석 추가 (책임 범위 명시). 다른 핵심 파일은 이미 헤더 주석이 있어 추가 작업 없음.
 
-**완료 기준**: 깨끗한 클론에서 `npm install && npm run dev`로 즉시 실행됨. 검색 결과에 `venv/Lib/site-packages` 안 섞임.
+**완료 기준 충족**: 깨끗한 클론에서 `npm install && npm run dev`로 즉시 실행 ✓. `npm run build` 75.41 kB / gzip 23.65 kB ✓. 검색 결과에 빌드 산출물 안 섞임.
 
 ---
 

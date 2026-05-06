@@ -1,3 +1,17 @@
+// Arcane Sandbox — main entry point.
+//
+// Responsibilities (kept intentionally narrow per docs/IMPLEMENTATION_SPEC.md
+// §100~107):
+//   1. Bind canvas pointer events and toolbar buttons.
+//   2. Run the analysis pipeline (recognition → arrangement → bone interaction
+//      → sentence → particles) on every stroke change and feed the analyzer
+//      panel.
+//   3. Drive the render loop and route Cast events to the Rift mini-game.
+//
+// Long-term game state (research funds, discoveries, papers, expeditions, …)
+// is intentionally NOT stored here — a dedicated `gameState.js` module owns
+// that (M1 in todo.md). The local `state` object below only tracks transient
+// canvas/input state.
 import './style.css'
 import { RecognitionEngine, __INTERNAL__ as RECOGNITION_INTERNAL } from './recognition.js'
 import { analyzeArrangement } from './arrangement.js'

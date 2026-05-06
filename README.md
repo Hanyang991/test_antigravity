@@ -51,6 +51,34 @@
    npm run dev
    ```
 4. 브라우저에서 `http://localhost:5173` 에 접속하여 캔버스 드로잉 테스트를 시작합니다.
+5. 프로덕션 빌드는 `npm run build` (`dist/`에 산출물 — 빌드 산출물은 git에 커밋하지 않음).
+
+## 📁 주요 파일 구성
+
+루트에 핵심 모듈이 평탄하게 놓여 있습니다 (`index.html`이 `/main.js`를 직접 import하기 때문).
+
+| 파일 | 역할 |
+|---|---|
+| `index.html` | 전체 UI 패널 구성과 진입점. `/main.js`를 `<script type="module">`로 로드. |
+| `style.css` | 네온 / 글래스모피즘 UI 스타일. 균열 / 캔버스 흉터 애니메이션 포함. |
+| `main.js` | 캔버스 입력, UI 이벤트 바인딩, 분석 파이프라인 호출, 균열 게임 연결. **앞으로 비대해지지 않게 새 시스템은 별도 모듈로 분리한다** (`docs/IMPLEMENTATION_SPEC.md` §83~107). |
+| `recognition.js` | $P Point-Cloud Recognizer. 룬 템플릿 + 부수 기반 조합 인식 (`RUNE_DICTIONARY.md` §1~8). |
+| `arrangement.js` | 다중 룬 공간 배치 분석 (§9). |
+| `bone-interaction.js` | 뼈대 ↔ 룬 상호작용 6유형 + 연결선 9종 + 감싸기 (§10 Phase 1+2). |
+| `sentence.js` | 접속사 / 문장 등급 / 읽기 방향 / 패턴 매칭 (§11.1, §12). |
+| `particles.js` | 조사 4 family — 격조사·강도부사·시제·부정 (§11.2). §2 부수와 의도적 중첩 발화. |
+| `rift.js` | 차원 균열 미니게임 루프. 위협도 드리프트 / 룬 요구 생성 / 캐스팅 판정. |
+| `RUNE_DICTIONARY.md` | 룬 사전 + 문법 규칙 (§1~12 + §11.2). |
+| `docs/IMPLEMENTATION_SPEC.md` | 전체 게임 구현 인수인계서 (2329줄). 학사·논문·탐사·경제까지 포괄. |
+| `todo.md` | 마일스톤별 작업 목록 + 현재 진행 상태. **새 작업은 여기 표를 보고 다음 마일스톤(M0~M9)부터 시작한다.** |
+| `.agents/skills/testing-arcane-sandbox/SKILL.md` | 캔버스 좌표 매핑 / 테스트 워크플로우 / 알려진 함정. Devin 세션이 자동 활성화. |
+
+## 🗺️ 구현 진행 상태
+
+전체 게임은 `docs/IMPLEMENTATION_SPEC.md`에 정의된 M0~M9 마일스톤으로 분할되어 있습니다.
+**현재 어느 단계인지, 다음에 무엇을 할지는 `todo.md`의 "현재 진행 상태" 표를 참조하세요.**
+
+각 마일스톤은 별도 PR로 머지하며, 완료 시 `todo.md`의 상태 컬럼을 갱신합니다.
 
 ---
 
