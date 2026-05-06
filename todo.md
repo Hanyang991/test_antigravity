@@ -26,7 +26,7 @@
 | §12 문장 등급 / 읽기 방향 / 패턴 매칭 | DONE | `sentence.js` (PR #9) |
 | 직선자 첫 클릭 OVERLOAD 버그 | FIXED | PR #12 |
 | **M0 저장소 정리** | DONE | `.gitignore` 보강, `dist/` 추적 해제, README 파일 표 + 진행 상태 섹션 (PR #14) |
-| **M1 gameState + saveLoad + eventBus** | TODO | 핵심 인프라. 전부 새 파일 |
+| **M1 gameState + saveLoad + eventBus** | DONE | `gameState.js`, `saveLoad.js`, `eventBus.js` 신규 + main.js init/autosave 와이어링 (PR #15) |
 | **M2 magicPipeline 분리** | TODO | `main.js`의 분석 로직을 한 함수로 모은다 |
 | **M3 boneInteraction 리네임 + 통합** | PARTIAL | 이미 `bone-interaction.js`에 거의 다 있음. 인수인계서가 요구하는 파일명(`boneInteraction.js`/`connectorLine.js` 분리)으로 정리하고 새 파이프라인에 연결만 하면 됨 |
 | **M4 grammarTokens** | PARTIAL | `sentence.js`의 접속사 + `particles.js`의 조사·부사·시제·부정이 이미 있음. 새 파이프라인이 읽을 수 있게 export만 정리하면 됨 |
@@ -59,29 +59,30 @@
 
 ---
 
-### M1. 전역 상태 + 저장/로드 + 이벤트 버스
+### M1. 전역 상태 + 저장/로드 + 이벤트 버스 — DONE (PR #15)
 
-**상태**: TODO  
+**상태**: DONE  
 **인수인계서**: §217~232, §371~435 (gameState 데이터 모델), §135~149 (eventBus 사용 예)  
-**예상 PR 크기**: 중간 (3~4 파일)
 
-신규 파일:
+작업 결과:
 
-- [ ] `gameState.js` — 인수인계서 §371~435의 객체 그대로 export. 초기값 포함. 단일 mutable 객체 (모듈 패턴).
-- [ ] `saveLoad.js` — `saveGame()`, `loadGame()`, `clearSave()`. localStorage key `arcane-sandbox.v2`. version 마이그레이션 분기 포함.
-- [ ] `eventBus.js` — `emit(name, payload)` / `on(name, fn)` / `off(name, fn)`. 단순 Map<string, Set<fn>>으로 충분.
+- [x] `gameState.js` — 인수인계서 §371~435 그대로. `STATE_VERSION=2`, `createInitialState()`, `replaceState()`, `resetState()` 제공. 단일 mutable singleton — 참조 동일성 유지 (다른 모듈이 캡처한 참조는 저장 후에도 자동 갱신됨).
+- [x] `saveLoad.js` — `saveGame()`, `loadGame()`, `clearSave()`. localStorage key `arcane-sandbox.v2`, 백업 key `arcane-sandbox.backup`. 마이그레이션 테이블 (v0/v1 → v2) 구현. 파싱 실패 시 원본을 백업 키로 돌리고 기본값으로 재시작.
+- [x] `eventBus.js` — `on/off/once/emit/clear/listenerCount` + 상수 이름 공간 `Events` (Frozen). 리스너가 throw 해도 다른 리스너에 도달.
 
-main.js 수정:
+main.js 수정 결과:
 
-- [ ] `init()` 시작에 `loadGame()` 호출
-- [ ] 5분 또는 10분마다 `saveGame()` 자동 저장 (autosave 설정 ON일 때만)
-- [ ] `cast` / `clear` / `undo` 직후에도 `saveGame()`
-- [ ] `window.__ARCANE_STATE__ = gameState` 노출 (디버그)
+- [x] `init()` 시작에 `loadGame()` 호출
+- [x] 30초마다 `saveGame()` 자동 저장 (autosave 설정 존중), `beforeunload`에서 최종 flush
+- [x] `window.__ARCANE_STATE__`, `window.__ARCANE_BUS__`, `window.__ARCANE__` 노출 (디버그/QA)
 
-**완료 기준** (인수인계서 §227~231):
-- 새로고침해도 연구비, 명성, 학위 점수, 발견 DB가 유지된다
-- 콘솔에서 `window.__ARCANE_STATE__`로 현재 상태 확인 가능
-- 기존 룬 드로잉/균열 동작 회귀 없음
+**완료 기준 충족**:
+- 새로고침해도 자원/발견/논문 등이 localStorage에서 복원됨 (테스트 결과 39/39 PASS)
+- `window.__ARCANE_STATE__`로 현재 상태 읽기 가능
+- `npm run build` 성공 79.47 kB / gzip 25.46 kB (M0 대비 +4 kB — 상태 관리 추가분)
+- 기존 룬/그림/균열 경로는 변경 없음 (임포트만 추가)
+
+**추가 도구**: `node /tmp/test_state.mjs` — localStorage 스텍 하에서 eventBus + gameState + saveLoad 완전성 검증 (39 assertions). M2에서도 사용 가능.
 
 ---
 

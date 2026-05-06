@@ -19,6 +19,9 @@ import { analyzeBoneInteraction } from './bone-interaction.js'
 import { analyzeSentence } from './sentence.js'
 import { analyzeParticles } from './particles.js'
 import { RiftGame } from './rift.js'
+import { gameState } from './gameState.js'
+import { loadGame, saveGame, clearSave } from './saveLoad.js'
+import * as eventBus from './eventBus.js'
 
 const { bboxOfStrokes, clusterStrokesByProximity } = RECOGNITION_INTERNAL;
 
@@ -335,6 +338,13 @@ let currentArchiveIndex = 0;
 
 // Init
 function init() {
+  // Restore saved game (research funds, discoveries, papers, …) before any
+  // UI module reads gameState. New games end up with default values.
+  const loadResult = loadGame();
+  if (loadResult.status === 'corrupt') {
+    console.warn('[init] save was corrupt; defaults restored. Backup kept under arcane-sandbox.backup.');
+  }
+
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
   
@@ -384,6 +394,31 @@ function init() {
 
   updateArchiveUI();
   refreshRiftUI();
+
+  // Long-term state lifecycle: autosave every 30 s while playing, plus a
+  // final flush on tab close. The save method is no-op if localStorage isn't
+  // available (private browsing, etc.) so this is safe everywhere.
+  if (gameState.settings.autosave) {
+    setInterval(saveGame, 30_000);
+  }
+  window.addEventListener('beforeunload', () => { saveGame(); });
+
+  // Dev-tools handle: lets the player inspect / poke their progress with
+  //   window.__ARCANE_STATE__
+  // and listen to / fire events with
+  //   window.__ARCANE_BUS__.on('magic:cast', console.log)
+  // A `__ARCANE__` umbrella also carries save helpers for QA.
+  if (typeof window !== 'undefined') {
+    window.__ARCANE_STATE__ = gameState;
+    window.__ARCANE_BUS__ = eventBus;
+    window.__ARCANE__ = {
+      state: gameState,
+      bus: eventBus,
+      saveGame,
+      loadGame,
+      clearSave,
+    };
+  }
 
   // Start loop
   requestAnimationFrame(renderLoop);
