@@ -123,8 +123,11 @@ export function classifyBoneShape(boneStrokes) {
 // True when bone bbox contains rune bbox with a non-trivial margin on every
 // side. Margin guards against false positives where the rune extends slightly
 // past the bone outline (e.g. a △ rune drawn just inside a triangle bone).
+//
+// 1D runes (e.g. 이사 `|` has w=0, 대지 `ㅡ` has h=0) are treated as enclosable;
+// only the bone bbox must be 2D for the margin to make sense.
 function boneEnclosesRune(boneBox, runeBox) {
-    if (boneBox.w <= 0 || boneBox.h <= 0 || runeBox.w <= 0 || runeBox.h <= 0) {
+    if (boneBox.w <= 0 || boneBox.h <= 0) {
         return false;
     }
     const margin = Math.min(boneBox.w, boneBox.h) * 0.06;
@@ -132,6 +135,26 @@ function boneEnclosesRune(boneBox, runeBox) {
            boneBox.maxX >= runeBox.maxX + margin &&
            boneBox.minY <= runeBox.minY - margin &&
            boneBox.maxY >= runeBox.maxY + margin;
+}
+
+// Inflate a degenerate (1D / very thin) rune bbox so downstream stroke-
+// intersection and centroid-distance math doesn't divide by zero. A `|`
+// (이사) rune comes in at w=0, h≈150; we inflate to a 10px-wide column
+// centered on the original line.
+function inflateThinBox(box) {
+    const min = 10;
+    if (box.w >= min && box.h >= min) return box;
+    const padX = box.w < min ? (min - box.w) / 2 : 0;
+    const padY = box.h < min ? (min - box.h) / 2 : 0;
+    const minX = box.minX - padX;
+    const maxX = box.maxX + padX;
+    const minY = box.minY - padY;
+    const maxY = box.maxY + padY;
+    return {
+        minX, maxX, minY, maxY,
+        w: maxX - minX, h: maxY - minY,
+        cx: (minX + maxX) / 2, cy: (minY + maxY) / 2,
+    };
 }
 
 const ENCLOSING_TABLE = {
@@ -240,7 +263,7 @@ export function analyzeBoneInteraction({ runeStrokes, boneStrokes, boneFirst = f
         return NONE;
     }
 
-    const runeBox = bboxOfStrokes(runeStrokes);
+    const runeBox = inflateThinBox(bboxOfStrokes(runeStrokes));
     const boneBox = bboxOfStrokes(boneStrokes);
     const shape = classifyBoneShape(boneStrokes);
 
