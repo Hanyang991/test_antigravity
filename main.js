@@ -577,7 +577,9 @@ function draw(e) {
     // Densify the straight line so the $P recognizer has enough samples.
     // Two raw points fail the `points.length < 5` early-return inside
     // identifyRune (and even with multiple ruler strokes, sparse points
-    // produce poor resample/Scale results).
+    // produce poor resample/Scale results). All densified points share the
+    // current timestamp (like compass below) so the heat formula doesn't
+    // treat the engine-generated samples as a fast hand drawing.
     const segments = 32;
     const linePoints = [];
     for (let i = 0; i <= segments; i++) {
@@ -585,7 +587,7 @@ function draw(e) {
       linePoints.push({
         x: drawStartPt.x + (offsetX - drawStartPt.x) * a,
         y: drawStartPt.y + (offsetY - drawStartPt.y) * a,
-        t: i === 0 ? drawStartPt.t : now,
+        t: now,
         mode: state.mode
       });
     }
