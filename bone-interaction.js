@@ -8,32 +8,59 @@
 //     걸치기  (Crossing)   — bone passes across rune              +10 ~ +30 inst
 //     관통    (Piercing)   — straight bone through rune center
 //     받치기  (Underlying) — bone drawn first, rune layered on top
-//     연결    (Bridging)   — bone connects two runes               (Phase 2)
-//     감싸기  (Wrapping)   — spiral / curve wraps a rune           (Phase 2)
+//     연결    (Bridging)   — bone connects two runes
+//     감싸기  (Wrapping)   — spiral / curve wraps a rune
 //
-// Phase 1 (this module) implements the four kinds that depend only on bbox
-// geometry: enclosing (with 4 shape variants), crossing (with 4 angle
-// variants), piercing, and underlying. Bridging and wrapping require
-// connection-line recognition (9 line types in §10) and are deferred.
+// Phase 1 implements the four kinds that depend only on bbox geometry:
+// enclosing (with 4 shape variants), crossing (with 4 angle variants),
+// piercing, and underlying.
+//
+// Phase 2 (this module, extended) adds the two relationship kinds that are
+// more linguistically rich:
+//
+//     연결    (Bridging) — bone(s) span between two rune clusters. Detection
+//                          classifies the bone(s) into one of 9 connector
+//                          line types from RUNE_DICTIONARY §10:
+//                            단선 · 이중선 · 삼중선 · 점선 · 파선 ·
+//                            물결선 · 나선 · 갈래선 · 고리선
+//                          Each carries its own efficiency (powerMul) and
+//                          stability delta. Bridging takes precedence over
+//                          Phase-1 kinds when 2+ rune clusters exist because
+//                          a bone "between" runes is fundamentally a multi-
+//                          rune relationship.
+//
+//     감싸기  (Wrapping)  — a single bone stroke that winds > 1.5 full turns
+//                          around a single rune. Strength scales with the
+//                          number of full turns (1 turn → ×1.5, capped at
+//                          5 turns → ×2.7). Detected after Phase-1 enclosing
+//                          so that a perfectly-closed circle still reads as
+//                          봉인 (Enclosing) rather than a 1-turn 감싸기.
 //
 // Output shape (returned to main.js):
 //   {
-//     kind: 'enclosing'|'crossing'|'piercing'|'underlying'|'none',
-//     label: '가두기'|'걸치기'|'관통'|'받치기'|'단순 뼈대',
-//     detail: string,                       // e.g. '봉인', '대각선 관통'
+//     kind: 'enclosing'|'crossing'|'piercing'|'underlying'|'bridging'
+//          |'wrapping'|'none',
+//     label: '가두기'|'걸치기'|'관통'|'받치기'|'연결'|'감싸기'|'단순 뼈대',
+//     detail: string,                       // e.g. '봉인', '단선 (─)'
 //     shape: 'circle'|'triangle'|'square'|'rhombus'|'line'|'curve'|null,
 //     powerMul: number,                     // 1.0 == neutral
 //     instabilityDelta: number,             // stacks on top of arrangement
+//     bridgeCount?: number,                 // bridging only: connector count
+//     turns?: number,                       // wrapping only: bone winding turns
 //   }
 //
 // Multiplier and instability values come straight out of the dictionary
-// tables (§10 가두기 detail at lines 388-393, 걸치기 detail at 399-404). The
-// resulting multiplier is independent of the §9 arrangement multiplier; both
-// are surfaced separately in the analyzer panel and main.js stacks them when
-// it computes the final cast power.
+// tables: §10 가두기 detail (RUNE_DICTIONARY.md lines 388-393), 걸치기 detail
+// (399-404), and 연결 detail (413-423). 받치기 / 관통 / 감싸기 don't have
+// explicit numeric tables, so we use values that match the spec's narrative
+// ("불안정성↓, 지속 시간↑" for 받치기; "응축 단발" for 감싸기).
+//
+// The resulting multiplier is independent of the §9 arrangement multiplier;
+// both are surfaced separately in the analyzer panel and main.js stacks them
+// when it computes the final cast power.
 
 import { __INTERNAL__ } from './recognition.js';
-const { bboxOfStrokes } = __INTERNAL__;
+const { bboxOfStrokes, clusterStrokesByProximity } = __INTERNAL__;
 
 // --- Shape classification --------------------------------------------------
 
@@ -242,6 +269,357 @@ const CROSSING_TABLE = {
 // from the spec's narrative ("불안정성 ↓, 지속 시간 ↑").
 const UNDERLYING_VALUES = { detail: '안정화 기반', powerMul: 1.0, instabilityDelta: -10 };
 
+// --- Bridging (연결) -------------------------------------------------------
+
+// 9 connector line types from RUNE_DICTIONARY §10. powerMul derives from the
+// spec's "전달 효율" column, except where a special effect overrides it:
+//
+//   - 물결선 ("도착 시 폭발적") → ×1.5 burst instead of base 80% efficiency
+//   - 나선 ("도착 시 ×2.0 폭발") → ×2.0 condensed burst instead of 60%
+//   - 갈래선 (각 50% 분배) → split is informational; total throughput is ×1.0
+//   - 고리선 (자기 유지 / 순환) → ×1.0 sustained loop, no per-cast burst
+//
+// instabilityDelta uses the spec value verbatim.
+const BRIDGE_TABLE = {
+    단선:    { detail: '단선 (─)',    powerMul: 0.9, instabilityDelta:   0 },
+    이중선:  { detail: '이중선 (═)',  powerMul: 1.0, instabilityDelta:   5 },
+    삼중선:  { detail: '삼중선 (≡)',  powerMul: 1.2, instabilityDelta:  15 },
+    점선:    { detail: '점선 (···)',  powerMul: 0.5, instabilityDelta:  -5 },
+    파선:    { detail: '파선 (- -)',  powerMul: 0.7, instabilityDelta: -10 },
+    물결선:  { detail: '물결선 (~)',  powerMul: 1.5, instabilityDelta:  10 },
+    나선:    { detail: '나선 (⌀)',    powerMul: 2.0, instabilityDelta:  20 },
+    갈래선:  { detail: '갈래선 (⑂)', powerMul: 1.0, instabilityDelta:   5 },
+    고리선:  { detail: '고리선 (∞)', powerMul: 1.0, instabilityDelta:  15 },
+};
+
+// Distance from a point to the closest edge/inside of a rectangle (0 if
+// inside). Used to decide whether a bone-stroke endpoint terminates "near"
+// a rune cluster.
+function pointToBoxDist(p, box) {
+    const dx = Math.max(box.minX - p.x, 0, p.x - box.maxX);
+    const dy = Math.max(box.minY - p.y, 0, p.y - box.maxY);
+    return Math.hypot(dx, dy);
+}
+
+// Direction angle (atan2 dy/dx) of the head→tail vector of a stroke.
+function strokeAngle(stroke) {
+    if (stroke.length < 2) return 0;
+    const dx = stroke[stroke.length - 1].x - stroke[0].x;
+    const dy = stroke[stroke.length - 1].y - stroke[0].y;
+    return Math.atan2(dy, dx);
+}
+
+// Two strokes are "parallel" for our purposes when their head→tail vectors
+// point in roughly the same (or opposite) direction AND their chord lengths
+// match within 40%. Used for 이중선 / 삼중선 detection.
+function isStrokePairParallel(a, b) {
+    const angA = strokeAngle(a), angB = strokeAngle(b);
+    let diff = Math.abs(angA - angB) % Math.PI;
+    if (diff > Math.PI / 2) diff = Math.PI - diff;
+    if (diff > Math.PI / 9) return false;   // ~20° tolerance
+    const lenA = Math.hypot(
+        a[a.length - 1].x - a[0].x, a[a.length - 1].y - a[0].y);
+    const lenB = Math.hypot(
+        b[b.length - 1].x - b[0].x, b[b.length - 1].y - b[0].y);
+    const maxLen = Math.max(lenA, lenB) || 1;
+    if (Math.abs(lenA - lenB) / maxLen > 0.4) return false;
+    return true;
+}
+
+// Perpendicular distance between two roughly-parallel strokes (mid-point of
+// `b` to the line through `a`). Used to gate 이중선/삼중선: lines too far apart
+// don't read as a bundle.
+function parallelGap(a, b) {
+    const mid = b[Math.floor(b.length / 2)];
+    return distPointToSeg(mid, a[0], a[a.length - 1]);
+}
+
+// Wave detector: count how many times the stroke crosses its own chord.
+// A straight line has 0 crossings; a curved-but-monotone arc has 0; an S-curve
+// has 1; a sine wave with 3 humps has ~5. Used to identify 물결선 vs 단선.
+function strokeChordCrossings(stroke) {
+    if (stroke.length < 4) return 0;
+    const head = stroke[0], tail = stroke[stroke.length - 1];
+    const chordLen = Math.hypot(tail.x - head.x, tail.y - head.y);
+    if (chordLen < 1) return 0;
+    const dx = (tail.x - head.x) / chordLen;
+    const dy = (tail.y - head.y) / chordLen;
+    let crossings = 0;
+    let prevSign = 0;
+    for (const p of stroke) {
+        const off = (p.x - head.x) * (-dy) + (p.y - head.y) * dx;
+        const sign = off > 0.5 ? 1 : (off < -0.5 ? -1 : 0);
+        if (sign !== 0) {
+            if (prevSign !== 0 && sign !== prevSign) crossings++;
+            prevSign = sign;
+        }
+    }
+    return crossings;
+}
+
+// Total signed angular winding of a stroke around point (cx, cy), in radians.
+// Used by both 나선 (around the midpoint between two clusters) and 감싸기
+// (around a single rune's center). A perfect circle returns ±2π.
+function angularWinding(stroke, cx, cy) {
+    let wind = 0;
+    let prev = null;
+    for (const p of stroke) {
+        const ang = Math.atan2(p.y - cy, p.x - cx);
+        if (prev !== null) {
+            let d = ang - prev;
+            while (d >  Math.PI) d -= 2 * Math.PI;
+            while (d < -Math.PI) d += 2 * Math.PI;
+            wind += d;
+        }
+        prev = ang;
+    }
+    return Math.abs(wind);
+}
+
+// True when the stroke head and tail are close (relative to total path
+// length), indicating a closed loop. Used to detect 고리선.
+function isClosedLoop(stroke) {
+    if (stroke.length < 4) return false;
+    const head = stroke[0], tail = stroke[stroke.length - 1];
+    const closure = Math.hypot(head.x - tail.x, head.y - tail.y);
+    let pathLen = 0;
+    for (let i = 1; i < stroke.length; i++) {
+        pathLen += Math.hypot(
+            stroke[i].x - stroke[i - 1].x,
+            stroke[i].y - stroke[i - 1].y);
+    }
+    return pathLen > 50 && closure < pathLen * 0.15;
+}
+
+// Pick out the bone strokes that "connect" cluster A to cluster B. Two
+// patterns count as bridging:
+//
+//   1. Direct bridge — one endpoint touches A's bbox and the other touches
+//      B's bbox (단선/이중선/삼중선/물결선/나선/고리선 are typically this).
+//   2. Chain element — a short stroke that lies entirely in the corridor
+//      between A and B without touching either, used to chain into a
+//      점선/파선 (dashed) connector when many such strokes are present.
+//
+// Returns the matching strokes; an empty list means no bone bridges between
+// A and B.
+function bridgingStrokes(boneStrokes, boxA, boxB) {
+    const a = inflateThinBox(boxA);
+    const b = inflateThinBox(boxB);
+    const sep = Math.hypot(a.cx - b.cx, a.cy - b.cy);
+    // Endpoint snap tolerance: 35% of the distance between the two clusters
+    // OR 60% of the smaller cluster's span, whichever is larger. Generous
+    // because hand-drawn bones rarely terminate exactly on the rune bbox.
+    const minSpan = Math.min(Math.max(a.w, a.h), Math.max(b.w, b.h));
+    const tol = Math.max(sep * 0.35, minSpan * 0.6, 25);
+    // Corridor extent (used for chain detection). Stroke center must fall
+    // between the two cluster centers (with a small margin) on both axes.
+    const corridorMargin = Math.max(sep * 0.1, 20);
+
+    const out = [];
+    for (const s of boneStrokes) {
+        if (s.length < 2) continue;
+        const head = s[0], tail = s[s.length - 1];
+        const dHA = pointToBoxDist(head, a);
+        const dHB = pointToBoxDist(head, b);
+        const dTA = pointToBoxDist(tail, a);
+        const dTB = pointToBoxDist(tail, b);
+        const headOnA = dHA <= tol && dHA <= dHB;
+        const tailOnB = dTB <= tol && dTB <= dTA;
+        const headOnB = dHB <= tol && dHB <= dHA;
+        const tailOnA = dTA <= tol && dTA <= dTB;
+        const directBridge = (headOnA && tailOnB) || (headOnB && tailOnA);
+
+        let chainBetween = false;
+        if (!directBridge) {
+            const sb = bboxOfStrokes([s]);
+            const inCorridor =
+                sb.cx >= Math.min(a.cx, b.cx) - corridorMargin &&
+                sb.cx <= Math.max(a.cx, b.cx) + corridorMargin &&
+                sb.cy >= Math.min(a.cy, b.cy) - corridorMargin &&
+                sb.cy <= Math.max(a.cy, b.cy) + corridorMargin;
+            const outsideClusters =
+                pointToBoxDist({ x: sb.cx, y: sb.cy }, a) > 5 &&
+                pointToBoxDist({ x: sb.cx, y: sb.cy }, b) > 5;
+            // Chain element: short stroke (≤ 40% of cluster separation) that
+            // sits in the AB corridor without touching either cluster.
+            const chordLen = Math.hypot(tail.x - head.x, tail.y - head.y);
+            chainBetween = inCorridor && outsideClusters &&
+                chordLen <= sep * 0.4;
+        }
+        if (directBridge || chainBetween) out.push(s);
+    }
+    return out;
+}
+
+// Classify the bone strokes that span between A and B into one of the 9
+// connector types. Returns one of the BRIDGE_TABLE keys, or null when the
+// strokes don't read as any recognizable connector pattern.
+function classifyConnector(strokes, boxA, boxB) {
+    if (!strokes || strokes.length === 0) return null;
+
+    const lens = strokes.map(s =>
+        Math.hypot(s[s.length - 1].x - s[0].x, s[s.length - 1].y - s[0].y));
+    const span = Math.hypot(boxA.cx - boxB.cx, boxA.cy - boxB.cy) || 1;
+
+    // ── Many short strokes → dashed family (점선 vs 파선) ───────────────
+    // Threshold: average chord ≤ 50% of cluster separation AND ≥ 3 strokes.
+    if (strokes.length >= 3) {
+        const avgLen = lens.reduce((a, b) => a + b, 0) / lens.length;
+        if (avgLen < span * 0.5) {
+            // 파선 (long-short repeating) when chord lengths are visibly
+            // bimodal — longest stroke ≥ 2× the shortest. Otherwise the
+            // dashes are uniformly short → 점선.
+            const minLen = Math.min(...lens);
+            const maxLen = Math.max(...lens);
+            if (minLen > 0 && maxLen / minLen >= 2.0) return '파선';
+            return '점선';
+        }
+    }
+
+    // ── Single-stroke connectors ────────────────────────────────────────
+    if (strokes.length === 1) {
+        const s = strokes[0];
+
+        // 고리선: closed loop encircling both clusters (or one + drift).
+        if (isClosedLoop(s)) return '고리선';
+
+        // 나선: winds ≥ 1.5 turns around the midpoint between A and B.
+        const midX = (boxA.cx + boxB.cx) / 2;
+        const midY = (boxA.cy + boxB.cy) / 2;
+        const wind = angularWinding(s, midX, midY);
+        if (wind > Math.PI * 3) return '나선';   // ≥ 1.5 full turns
+
+        // 물결선: enough chord crossings to count as wavy (≥ 2).
+        if (strokeChordCrossings(s) >= 2) return '물결선';
+
+        // Default: 단선.
+        return '단선';
+    }
+
+    // ── 2 strokes: 이중선 if parallel and close, else fall through to 단선
+    if (strokes.length === 2 && isStrokePairParallel(strokes[0], strokes[1])) {
+        const len = Math.max(...lens) || 1;
+        if (parallelGap(strokes[0], strokes[1]) < len * 0.25) return '이중선';
+    }
+
+    // ── 3+ strokes: 삼중선 if all 3 mutually parallel and close ──────────
+    if (strokes.length === 3 &&
+        isStrokePairParallel(strokes[0], strokes[1]) &&
+        isStrokePairParallel(strokes[1], strokes[2]) &&
+        isStrokePairParallel(strokes[0], strokes[2])) {
+        const len = Math.max(...lens) || 1;
+        const g01 = parallelGap(strokes[0], strokes[1]);
+        const g12 = parallelGap(strokes[1], strokes[2]);
+        if (g01 < len * 0.25 && g12 < len * 0.25) return '삼중선';
+    }
+
+    // Multi-stroke fallback: treat as a thicker 단선 bundle.
+    return '단선';
+}
+
+// Try the §10 연결 (Bridging) reading. Requires ≥2 rune clusters AND at
+// least one bone stroke whose endpoints touch both. Returns the descriptor
+// or null. When 3+ clusters exist and a single starting cluster has bones
+// reaching ≥2 other clusters, returns 갈래선 (branched distribution).
+function analyzeBridging({ runeStrokes, boneStrokes }) {
+    if (!runeStrokes || runeStrokes.length === 0) return null;
+    if (!boneStrokes || boneStrokes.length === 0) return null;
+
+    const clusters = clusterStrokesByProximity(runeStrokes);
+    if (clusters.length < 2) return null;
+
+    const boxes = clusters.map(c => bboxOfStrokes(c));
+
+    // 갈래선 — one cluster originates connectors to ≥ 2 distinct other
+    // clusters. Detected before pair-wise classification so a 1-to-many
+    // distribution doesn't get misread as a single bridge.
+    if (clusters.length >= 3) {
+        for (let i = 0; i < clusters.length; i++) {
+            const reaches = [];
+            for (let j = 0; j < clusters.length; j++) {
+                if (i === j) continue;
+                const ij = bridgingStrokes(boneStrokes, boxes[i], boxes[j]);
+                if (ij.length > 0) reaches.push(j);
+            }
+            if (reaches.length >= 2) {
+                const t = BRIDGE_TABLE.갈래선;
+                return {
+                    kind: 'bridging',
+                    label: '연결',
+                    detail: `${t.detail} · ${reaches.length}갈래`,
+                    shape: 'line',
+                    powerMul: t.powerMul,
+                    instabilityDelta: t.instabilityDelta,
+                    bridgeCount: reaches.length,
+                };
+            }
+        }
+    }
+
+    // Pair-wise: try the two largest clusters first. (Largest = bbox area.)
+    const order = boxes
+        .map((b, i) => ({ i, area: Math.max(b.w, 1) * Math.max(b.h, 1) }))
+        .sort((p, q) => q.area - p.area)
+        .map(o => o.i);
+
+    for (let i = 0; i < order.length; i++) {
+        for (let j = i + 1; j < order.length; j++) {
+            const A = boxes[order[i]];
+            const B = boxes[order[j]];
+            const bridges = bridgingStrokes(boneStrokes, A, B);
+            if (bridges.length === 0) continue;
+            const kind = classifyConnector(bridges, A, B);
+            if (!kind) continue;
+            const t = BRIDGE_TABLE[kind];
+            return {
+                kind: 'bridging',
+                label: '연결',
+                detail: t.detail,
+                shape: 'line',
+                powerMul: t.powerMul,
+                instabilityDelta: t.instabilityDelta,
+                bridgeCount: bridges.length,
+            };
+        }
+    }
+
+    return null;
+}
+
+// --- Wrapping (감싸기) -----------------------------------------------------
+
+// 감싸기: a single bone stroke that winds at least 1.5 full turns around the
+// rune's center. The spec calls out "에너지 응축. 느리지만 강력한 단발" —
+// represented as a turn-count-scaled multiplier (×1.5 at 1.5 turns,
+// approaching ×2.7 at 5+ turns).
+function analyzeWrapping({ runeStrokes, boneStrokes }) {
+    if (!runeStrokes || runeStrokes.length === 0) return null;
+    if (!boneStrokes || boneStrokes.length === 0) return null;
+
+    const runeBox = inflateThinBox(bboxOfStrokes(runeStrokes));
+
+    let bestTurns = 0;
+    for (const s of boneStrokes) {
+        if (s.length < 8) continue;
+        const wind = angularWinding(s, runeBox.cx, runeBox.cy);
+        const turns = wind / (Math.PI * 2);
+        if (turns > bestTurns) bestTurns = turns;
+    }
+    if (bestTurns < 0.75) return null;          // < 1.5 half-turns → no spiral
+
+    const cappedTurns = Math.min(bestTurns, 5);
+    const powerMul = 1.5 + (cappedTurns - 1) * 0.3;   // 1→1.5, 5→2.7
+    return {
+        kind: 'wrapping',
+        label: '감싸기',
+        detail: `나선 ${bestTurns.toFixed(1)}회 감기`,
+        shape: 'curve',
+        powerMul: Number(powerMul.toFixed(2)),
+        instabilityDelta: 15,
+        turns: bestTurns,
+    };
+}
+
 // --- Main entrypoint -------------------------------------------------------
 
 /**
@@ -267,9 +645,18 @@ export function analyzeBoneInteraction({ runeStrokes, boneStrokes, boneFirst = f
     const boneBox = bboxOfStrokes(boneStrokes);
     const shape = classifyBoneShape(boneStrokes);
 
+    // 0. Bridging (연결) — when the player has drawn ≥2 spatially-separate
+    // rune clusters AND a bone stroke spans between them, that relationship
+    // dominates: a bone "between" two runes is structurally a connector and
+    // should never be misread as a Phase-1 enclosing/crossing/etc. of either
+    // single rune. Returns null when there's only one rune cluster on the
+    // canvas, falling through to the rest of the pipeline.
+    const bridge = analyzeBridging({ runeStrokes, boneStrokes });
+    if (bridge) return bridge;
+
     // 1. Enclosing (가두기) — bone bbox surrounds rune bbox AND bone is a
-    // closed/recognizable shape. Highest priority because it's the most
-    // structurally constrained relationship.
+    // closed/recognizable shape. Highest priority among single-rune kinds
+    // because it's the most structurally constrained relationship.
     if (['circle', 'triangle', 'square', 'rhombus'].includes(shape) &&
         boneEnclosesRune(boneBox, runeBox)) {
         const t = ENCLOSING_TABLE[shape];
@@ -352,6 +739,13 @@ export function analyzeBoneInteraction({ runeStrokes, boneStrokes, boneFirst = f
         };
     }
 
+    // 4. Wrapping (감싸기) — single bone stroke that winds ≥ 1.5 turns around
+    // the rune center. Tested last so a perfect 1-stroke circle that fully
+    // encloses the rune still reads as Enclosing 봉인 (×1.2, more specific)
+    // rather than a 1-turn 감싸기.
+    const wrap = analyzeWrapping({ runeStrokes, boneStrokes });
+    if (wrap) return wrap;
+
     return { ...NONE, shape };
 }
 
@@ -359,4 +753,9 @@ export function analyzeBoneInteraction({ runeStrokes, boneStrokes, boneFirst = f
 export const __INTERNAL__BONE = {
     classifyBoneShape, boneEnclosesRune, classifyAngle, strokeCrossesBox,
     ENCLOSING_TABLE, CROSSING_TABLE, UNDERLYING_VALUES,
+    BRIDGE_TABLE,
+    analyzeBridging, analyzeWrapping,
+    classifyConnector, bridgingStrokes,
+    angularWinding, strokeChordCrossings,
+    isStrokePairParallel, parallelGap, isClosedLoop,
 };
