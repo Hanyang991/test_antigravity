@@ -1,8 +1,10 @@
 import './style.css'
 import { RecognitionEngine } from './recognition.js'
 import { analyzeArrangement } from './arrangement.js'
+import { RiftGame } from './rift.js'
 
 const recognizer = new RecognitionEngine();
+const riftGame = new RiftGame();
 const state = {
   mode: 'bone', // 'bone' or 'rune'
   assistMode: 'free', // 'free', 'ruler', 'compass'
@@ -39,6 +41,22 @@ const btnDrawBone = document.getElementById('btn-draw-bone');
 const btnDrawRune = document.getElementById('btn-draw-rune');
 const btnClear = document.getElementById('btn-clear');
 const btnUndo = document.getElementById('btn-undo');
+
+// Rift Game UI
+const btnRiftStart = document.getElementById('btn-rift-start');
+const btnRiftStop = document.getElementById('btn-rift-stop');
+const riftScoreEl = document.getElementById('rift-score');
+const riftLevelEl = document.getElementById('rift-level');
+const riftThreatFill = document.getElementById('rift-threat-fill');
+const riftThreatVal = document.getElementById('rift-threat-val');
+const riftDemandBlock = document.getElementById('rift-demand-block');
+const riftDemandName = document.getElementById('rift-demand-name');
+const riftDemandSketch = document.getElementById('rift-demand-sketch');
+const riftTimerEl = document.getElementById('rift-timer');
+const riftMessageEl = document.getElementById('rift-message');
+// Cache the latest analyzer output so castMagic can judge it against the
+// current Rift demand without re-running recognition.
+let lastAnalysis = null;
 
 const valResonance = document.getElementById('val-resonance');
 const valHeat = document.getElementById('val-heat');
@@ -249,8 +267,18 @@ function init() {
   btnPrevDoc.addEventListener('click', () => changeArchive(-1));
   btnNextDoc.addEventListener('click', () => changeArchive(1));
   btnCastMagic.addEventListener('click', castMagic);
-  
+
+  btnRiftStart.addEventListener('click', () => {
+    riftGame.start();
+    refreshRiftUI();
+  });
+  btnRiftStop.addEventListener('click', () => {
+    riftGame.stop();
+    refreshRiftUI();
+  });
+
   updateArchiveUI();
+  refreshRiftUI();
 
   // Start loop
   requestAnimationFrame(renderLoop);
@@ -271,22 +299,80 @@ function updateArchiveUI() {
 }
 
 function castMagic() {
-  // Visual effect for casting into Rift
-  riftContainer.style.animation = 'none'; // reset
+  // Always run the visual cue: the rift pulses and the canvas flashes.
+  riftContainer.style.animation = 'none';
   setTimeout(() => {
     riftContainer.style.animation = 'pulse 0.5s ease-out 3';
   }, 10);
-  
-  systemStatus.innerText = `[마법 주입!] ${state.currentMeaning}이(가) 균열로 빨려들어갑니다!`;
-  systemStatus.style.color = '#fff';
-  
-  // Flash effect on canvas
-  ctx.fillStyle = 'rgba(138, 43, 226, 0.5)';
+
+  // When the Rift game is active, judge the cast against the current demand.
+  // This intentionally happens BEFORE the canvas wipe so the analyzer state we
+  // pass in still reflects what the player drew.
+  if (riftGame.status === 'active') {
+    const judged = riftGame.cast(lastAnalysis || {
+      meaning: state.currentMeaning,
+      compoundName: state.currentCompound
+    });
+    if (judged.result === 'success') {
+      ctx.fillStyle = 'rgba(0, 255, 153, 0.45)';
+    } else if (judged.result === 'wrong') {
+      ctx.fillStyle = 'rgba(255, 51, 102, 0.45)';
+    } else {
+      ctx.fillStyle = 'rgba(138, 43, 226, 0.45)';
+    }
+    refreshRiftUI();
+  } else {
+    systemStatus.innerText = `[마법 주입!] ${state.currentMeaning}이(가) 균열로 빨려들어갑니다!`;
+    systemStatus.style.color = '#fff';
+    ctx.fillStyle = 'rgba(138, 43, 226, 0.5)';
+  }
+
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  
+
   setTimeout(() => {
     clearCanvas();
   }, 500);
+}
+
+function refreshRiftUI() {
+  const status = riftGame.status;
+  riftScoreEl.innerText = String(riftGame.score);
+  riftLevelEl.innerText = String(riftGame.getLevel() + 1);
+  const pct = Math.round(riftGame.threat);
+  riftThreatFill.style.width = `${pct}%`;
+  riftThreatVal.innerText = `${pct}%`;
+
+  // Drive the background rift element via a body data-attribute so CSS can
+  // shift the gradient/animation without inline JS-driven keyframes.
+  let band = 'low';
+  if (status === 'gameover' || pct >= 100) band = 'over';
+  else if (pct >= 70) band = 'high';
+  else if (pct >= 35) band = 'mid';
+  document.body.dataset.threat = band;
+
+  if (status === 'active' && riftGame.demand) {
+    riftDemandBlock.style.display = 'grid';
+    riftDemandName.innerText = riftGame.demand.label;
+    riftDemandSketch.innerHTML = riftGame.demand.sketch;
+    riftTimerEl.innerText = `${riftGame.timeRemaining.toFixed(1)}s`;
+    btnRiftStart.style.display = 'none';
+    btnRiftStop.style.display = 'inline-block';
+  } else {
+    riftDemandBlock.style.display = 'none';
+    btnRiftStart.style.display = 'inline-block';
+    btnRiftStop.style.display = 'none';
+    if (status === 'gameover') {
+      btnRiftStart.innerText = '다시 시작';
+    } else {
+      btnRiftStart.innerText = '차원 균열 시작';
+    }
+  }
+
+  riftMessageEl.classList.remove('success', 'wrong', 'expired');
+  if (riftGame.lastResult) {
+    riftMessageEl.classList.add(riftGame.lastResult);
+  }
+  riftMessageEl.innerText = riftGame.message;
 }
 
 function resizeCanvas() {
@@ -428,6 +514,14 @@ function stopDrawing() {
 
 // Rendering Loop
 function renderLoop() {
+  // Tick the Rift game once per frame so threat drift / timer countdown stay
+  // smooth. refreshRiftUI is cheap (no recognition work) and keeps the
+  // top-center panel + body data-threat in sync with current threat.
+  if (riftGame.status === 'active') {
+    riftGame.tick(performance.now());
+    refreshRiftUI();
+  }
+
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   
   if (state.overloaded) {
@@ -593,6 +687,7 @@ function analyzeCurrentState() {
   state.currentMeaning = analysis.meaning;
   state.currentDynamics = analysis.dynamics;
   state.currentCompound = analysis.compoundName || null;
+  lastAnalysis = analysis;
 
   updateAnalyzerUI();
 }
@@ -630,20 +725,26 @@ function updateAnalyzerUI() {
   // something different from a plain template match. Falls back to the regular
   // teal/purple/red flow when no compound is active.
   const compoundColor = '#ffaa00';
+  // During a Rift run the player must be able to cast at the demand even if
+  // they haven't laid down enough bones for full resonance — the rift game has
+  // its own pressure (timer + threat) and shouldn't double-gate on resonance.
+  const riftActive = riftGame.status === 'active';
+  const hasRune = runeStrokesCount() > 0;
+  const resonant = state.resonance > 30 && hasRune;
+  const canCast = resonant || (riftActive && hasRune);
   if (state.instability > 80) {
     systemStatus.innerText = `[경고] 붕괴 임박! (${state.currentMeaning})`;
     systemStatus.style.color = '#ff3366';
     btnCastMagic.style.display = 'none';
   } else if (state.currentCompound) {
-    const cast = state.resonance > 30 && runeStrokesCount() > 0;
-    const prefix = cast ? '결합 발현' : '결합 감지';
+    const prefix = canCast ? '결합 발현' : '결합 감지';
     systemStatus.innerText = `${prefix}: ${state.currentCompound} - ${state.currentDynamics}`;
     systemStatus.style.color = compoundColor;
-    btnCastMagic.style.display = cast ? 'block' : 'none';
-  } else if (state.resonance > 30 && runeStrokesCount() > 0) {
+    btnCastMagic.style.display = canCast ? 'block' : 'none';
+  } else if (canCast) {
     systemStatus.innerText = `발현 중: ${state.currentMeaning} - ${state.currentDynamics}`;
     systemStatus.style.color = '#8a2be2';
-    btnCastMagic.style.display = 'block'; // Show cast button when magic is active
+    btnCastMagic.style.display = 'block';
   } else if (state.strokes.length > 0) {
     systemStatus.innerText = `분석 중: ${state.currentMeaning}`;
     systemStatus.style.color = '#00ffff';

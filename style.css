@@ -114,6 +114,162 @@ body {
   color: var(--color-secondary);
 }
 
+/* Top Center: Abyssal Rift Game */
+.rift-panel {
+  position: absolute;
+  top: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 360px;
+  max-width: calc(100vw - 4rem);
+}
+
+.rift-panel.is-active .rift {
+  /* let the underlying rift element react via body/data attributes */
+}
+
+.rift-score-badge {
+  font-family: var(--font-data);
+  font-size: 0.8rem;
+  color: var(--color-secondary);
+  letter-spacing: 1px;
+}
+
+.threat-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: var(--font-data);
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-bottom: 0.8rem;
+}
+
+.threat-bar {
+  flex: 1;
+  height: 12px;
+  background: rgba(0,0,0,0.6);
+  border: 1px solid rgba(138, 43, 226, 0.4);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+}
+
+.threat-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #00ffff, #8a2be2 60%, #ff3366);
+  transition: width 0.2s linear;
+  box-shadow: 0 0 12px rgba(255, 51, 102, 0.5);
+}
+
+.threat-val {
+  font-weight: bold;
+  color: var(--color-text);
+  min-width: 3.2rem;
+  text-align: right;
+}
+
+.demand-block {
+  background: rgba(0,0,0,0.4);
+  border: 1px dashed rgba(255,170,0,0.5);
+  border-radius: 8px;
+  padding: 0.8rem;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto auto;
+  grid-template-areas:
+    "label sketch"
+    "name  sketch"
+    "timer sketch";
+  gap: 0.3rem 0.8rem;
+  align-items: center;
+  margin-bottom: 0.8rem;
+}
+
+.demand-label {
+  grid-area: label;
+  font-family: var(--font-data);
+  font-size: 0.75rem;
+  color: #ffaa00;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.demand-name {
+  grid-area: name;
+  font-family: var(--font-data);
+  font-size: 1.1rem;
+  color: #ffd97a;
+  font-weight: bold;
+}
+
+.demand-sketch {
+  grid-area: sketch;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.timer-row {
+  grid-area: timer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: var(--font-data);
+  font-size: 0.85rem;
+}
+
+.timer-label {
+  color: var(--color-text-muted);
+}
+
+.timer-val {
+  color: var(--color-secondary);
+  font-weight: bold;
+  font-size: 1rem;
+}
+
+.rift-message {
+  font-family: var(--font-data);
+  font-size: 0.8rem;
+  color: var(--color-text);
+  text-align: center;
+  margin-bottom: 0.6rem;
+  min-height: 1.1em;
+}
+
+.rift-message.success { color: #00ff99; }
+.rift-message.wrong { color: #ff3366; }
+.rift-message.expired { color: #ffaa00; }
+
+.rift-controls {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+/* Drive the background rift element from threat level. main.js writes
+ * data-threat="low|mid|high|over" on <body>; we accelerate the pulse and
+ * shift colors accordingly so the player feels the danger build. */
+body[data-threat="mid"] .rift {
+  animation-duration: 2.4s;
+  background: radial-gradient(circle, rgba(0,0,0,1) 0%, rgba(60,0,40,0.6) 40%, rgba(0,0,0,0) 70%);
+}
+body[data-threat="high"] .rift {
+  animation-duration: 1.2s;
+  background: radial-gradient(circle, rgba(0,0,0,1) 0%, rgba(120,0,30,0.7) 40%, rgba(0,0,0,0) 75%);
+  box-shadow: 0 0 80px rgba(255, 51, 102, 0.5), inset 0 0 50px rgba(255, 51, 102, 0.3);
+}
+body[data-threat="over"] .rift {
+  animation-duration: 0.6s;
+  background: radial-gradient(circle, rgba(0,0,0,1) 0%, rgba(255,30,30,0.85) 50%, rgba(255,0,0,0) 80%);
+  box-shadow: 0 0 120px rgba(255, 51, 102, 0.8), inset 0 0 80px rgba(255, 51, 102, 0.5);
+}
+
 /* Top Left: Archive */
 .archive-panel {
   position: absolute;

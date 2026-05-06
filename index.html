@@ -22,7 +22,36 @@
 
       <!-- UI Overlay -->
       <div id="ui-layer">
-        
+
+        <!-- Top Center: Abyssal Rift Game -->
+        <div class="panel rift-panel glass-panel">
+          <div class="panel-header">
+            <h2>차원 균열</h2>
+            <div class="rift-score-badge">점수 <span id="rift-score">0</span> · LV <span id="rift-level">1</span></div>
+          </div>
+          <div class="panel-content">
+            <div class="threat-row">
+              <span class="threat-label">위협도</span>
+              <div class="threat-bar"><div class="threat-fill" id="rift-threat-fill"></div></div>
+              <span class="threat-val" id="rift-threat-val">0%</span>
+            </div>
+            <div class="demand-block" id="rift-demand-block" style="display:none;">
+              <div class="demand-label">균열의 요구</div>
+              <div class="demand-name" id="rift-demand-name">--</div>
+              <div class="demand-sketch" id="rift-demand-sketch"></div>
+              <div class="timer-row">
+                <span class="timer-label">남은 시간</span>
+                <span class="timer-val" id="rift-timer">--</span>
+              </div>
+            </div>
+            <div class="rift-message" id="rift-message">균열이 잠잠하다. 시작하면 첫 요구가 떨어진다.</div>
+            <div class="rift-controls">
+              <button class="tool-btn" id="btn-rift-start">차원 균열 시작</button>
+              <button class="tool-btn" id="btn-rift-stop" style="display:none; border-color:#ff3366; color:#ff3366;">중단</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Top Left: Archives -->
         <div class="panel archive-panel glass-panel">
           <div class="panel-header">
