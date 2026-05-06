@@ -3,6 +3,7 @@ import { RecognitionEngine } from './recognition.js'
 import { analyzeArrangement } from './arrangement.js'
 import { analyzeBoneInteraction } from './bone-interaction.js'
 import { analyzeSentence } from './sentence.js'
+import { analyzeParticles } from './particles.js'
 import { RiftGame } from './rift.js'
 
 const recognizer = new RecognitionEngine();
@@ -44,6 +45,13 @@ const state = {
   // {kind, grade, direction, connectors, mainCount, powerMul, …}
   // — see sentence.js.
   sentence: null,
+  // Particle system (RUNE_DICTIONARY §11.2): small decorator strokes
+  // attached to a main rune resolve into 격조사 / 강도부사 / 시제 / 부정.
+  // Stacks multiplicatively with §9 / §10 / §12. Intentionally allowed to
+  // overlap with the §2 radical/compound system — same physical stroke can
+  // fire BOTH systems at once. {kind, runes, powerMul, instabilityDelta,
+  // detail, particleCount} — see particles.js.
+  particles: null,
   overloaded: false
 };
 
@@ -83,6 +91,8 @@ const valBoneInteraction = document.getElementById('val-bone-interaction');
 const boneInteractionDetail = document.getElementById('bone-interaction-detail');
 const valSentence = document.getElementById('val-sentence');
 const sentenceDetail = document.getElementById('sentence-detail');
+const valParticle = document.getElementById('val-particle');
+const particleDetail = document.getElementById('particle-detail');
 const systemStatus = document.getElementById('system-status');
 
 // Archive Elements
@@ -401,6 +411,7 @@ function castMagic() {
       arrangement: state.arrangement,
       boneInteraction: state.boneInteraction,
       sentence: state.sentence,
+      particles: state.particles,
     });
     if (judged.result === 'success') {
       ctx.fillStyle = 'rgba(0, 255, 153, 0.45)';
@@ -493,12 +504,13 @@ function clearCanvas() {
   state.heat = 0;
   state.instability = 0;
   state.currentCompound = null;
-  // Reset the §9/§10/§11-12 analyzer outputs too so the panels collapse to
-  // their empty state ('단일 룬' / '단순 뼈대' / '--') immediately on Clear
-  // instead of carrying over stale values from the previous canvas.
+  // Reset the §9/§10/§11-12/§11.2 analyzer outputs too so the panels collapse
+  // to their empty state ('단일 룬' / '단순 뼈대' / '--' / '없음') immediately
+  // on Clear instead of carrying over stale values from the previous canvas.
   state.arrangement = null;
   state.boneInteraction = null;
   state.sentence = null;
+  state.particles = null;
   updateAnalyzerUI();
 }
 
@@ -522,6 +534,7 @@ function undoLastStroke() {
     state.arrangement = null;
     state.boneInteraction = null;
     state.sentence = null;
+    state.particles = null;
     systemStatus.innerText = '대기 중...';
     systemStatus.style.color = '#fff';
     btnCastMagic.style.display = 'none';
@@ -744,6 +757,23 @@ function analyzeCurrentState() {
   });
   state.sentence = sentence;
 
+  // Particle system (RUNE_DICTIONARY §11.2). Reuses the sentence's
+  // mainUnits (excludes connector runes) so a small stroke "between" two
+  // main runes never accidentally counts as a particle on either of them.
+  // Stacks with arrangement / bone / sentence multiplicatively. By design
+  // also stacks with §2 radical compounds (no exclusion logic) so the
+  // same drawing yields different cast behavior depending on which layer
+  // the player optimizes around.
+  const particleMainUnits = (sentence && Array.isArray(sentence.mainUnits)
+                              && sentence.mainUnits.length > 0)
+    ? sentence.mainUnits
+    : (arrangement && Array.isArray(arrangement.units) ? arrangement.units : []);
+  const particles = analyzeParticles({
+    runeStrokes,
+    mainUnits: particleMainUnits,
+  });
+  state.particles = particles;
+
   // Thermodynamics: Volume (V) = Area of Bones
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   boneStrokes.forEach(stroke => {
@@ -806,9 +836,10 @@ function analyzeCurrentState() {
   const arrangementDelta = (state.arrangement && state.arrangement.instabilityDelta) || 0;
   const boneInteractionDelta = (state.boneInteraction && state.boneInteraction.instabilityDelta) || 0;
   const sentenceDelta = (state.sentence && state.sentence.instabilityDelta) || 0;
+  const particleDelta = (state.particles && state.particles.instabilityDelta) || 0;
   state.instability = Math.max(Math.min(
     baseInstability + analysis.instabilityModifier
-      + arrangementDelta + boneInteractionDelta + sentenceDelta,
+      + arrangementDelta + boneInteractionDelta + sentenceDelta + particleDelta,
     100), 0);
 
   // Overload reflects whether the current stroke set exceeds limits. Recompute
@@ -870,6 +901,30 @@ function updateAnalyzerUI() {
       valBoneInteraction.style.color = '#666666';
       boneInteractionDetail.innerText = '';
       boneInteractionDetail.style.display = 'none';
+    }
+  }
+
+  // Particle panel (RUNE_DICTIONARY §11.2). Shows the resolved particle
+  // for each main rune (강도부사 ×N.N / 격조사 / 시제 / 부정). Stacks
+  // multiplicatively with the other layers; gold when net powerMul is
+  // amplifying (≥1.5) or runaway (×5), cyan when stabilizing (negative
+  // instability delta), red when negation zeroes the cast (×0).
+  if (valParticle && particleDetail) {
+    const p = state.particles;
+    if (p && p.kind === 'particle' && p.particleCount > 0) {
+      const mul = p.powerMul.toFixed(1);
+      valParticle.innerText = `${p.particleCount}개 ×${mul}`;
+      particleDetail.innerText = p.detail || '';
+      particleDetail.style.display = p.detail ? 'block' : 'none';
+      if (p.powerMul === 0) valParticle.style.color = '#ff3366';
+      else if (p.powerMul >= 1.5) valParticle.style.color = '#ffaa00';
+      else if (p.instabilityDelta < 0) valParticle.style.color = '#5fdfff';
+      else valParticle.style.color = '#cccccc';
+    } else {
+      valParticle.innerText = '없음';
+      valParticle.style.color = '#666666';
+      particleDetail.innerText = '';
+      particleDetail.style.display = 'none';
     }
   }
 

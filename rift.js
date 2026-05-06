@@ -172,13 +172,13 @@ export class RiftGame {
 
     // Called when the user clicks Cast. `analysis` is the recognizer output for
     // the current canvas: { meaning, compoundName, arrangement, boneInteraction,
-    // sentence, ... }. Returns a result object so main.js can play a
+    // sentence, particles, ... }. Returns a result object so main.js can play a
     // corresponding visual cue. When the analyzer reports a non-trivial
-    // arrangement (§9), bone interaction (§10), and/or sentence grade
-    // (§§11-12), their powerMuls multiply together and scale both score
+    // arrangement (§9), bone interaction (§10), sentence grade (§§11-12), and/or
+    // particles (§11.2), their powerMuls multiply together and scale both score
     // reward and threat relief — so a bone-triangle 삼중 강화 (×2.0) inside a
-    // rhombus 공명 (×1.8) on a 절 sentence (×1.1) hits 3.96× as hard as a
-    // plain solo cast.
+    // rhombus 공명 (×1.8) on a 절 sentence (×1.1) with 극대 particle (×2.0)
+    // hits 7.92× as hard as a plain solo cast.
     cast(analysis) {
         if (this.status !== 'active' || !this.demand) {
             return { result: 'idle' };
@@ -188,10 +188,12 @@ export class RiftGame {
         const arr = analysis && analysis.arrangement;
         const bone = analysis && analysis.boneInteraction;
         const sentence = analysis && analysis.sentence;
+        const particles = analysis && analysis.particles;
         const arrMul = (arr && typeof arr.powerMul === 'number') ? arr.powerMul : 1.0;
         const boneMul = (bone && typeof bone.powerMul === 'number') ? bone.powerMul : 1.0;
         const sentMul = (sentence && typeof sentence.powerMul === 'number') ? sentence.powerMul : 1.0;
-        const powerMul = arrMul * boneMul * sentMul;
+        const partMul = (particles && typeof particles.powerMul === 'number') ? particles.powerMul : 1.0;
+        const powerMul = arrMul * boneMul * sentMul * partMul;
         if (matched) {
             const level = levelFor(this.score);
             const isCompound = this.demand.compound === true;
@@ -214,6 +216,9 @@ export class RiftGame {
             }
             if (sentence && sentence.kind === 'sentence' && sentMul !== 1.0) {
                 tags.push(`${sentence.label} ×${sentMul.toFixed(1)}`);
+            }
+            if (particles && particles.kind === 'particle' && partMul !== 1.0) {
+                tags.push(`조사 ×${partMul.toFixed(1)}`);
             }
             const bonus = tags.length > 0 ? ` [${tags.join(' · ')}]` : '';
             this.message = `${this.demand.label} 봉합 성공!${bonus} +${totalReward}점`;
