@@ -1,9 +1,12 @@
 import './style.css'
-import { RecognitionEngine } from './recognition.js'
+import { RecognitionEngine, __INTERNAL__ as RECOGNITION_INTERNAL } from './recognition.js'
 import { analyzeArrangement } from './arrangement.js'
 import { analyzeBoneInteraction } from './bone-interaction.js'
 import { analyzeSentence } from './sentence.js'
+import { analyzeParticles } from './particles.js'
 import { RiftGame } from './rift.js'
+
+const { bboxOfStrokes, clusterStrokesByProximity } = RECOGNITION_INTERNAL;
 
 const recognizer = new RecognitionEngine();
 const riftGame = new RiftGame();
@@ -44,6 +47,13 @@ const state = {
   // {kind, grade, direction, connectors, mainCount, powerMul, …}
   // — see sentence.js.
   sentence: null,
+  // Particle system (RUNE_DICTIONARY §11.2): small decorator strokes
+  // attached to a main rune resolve into 격조사 / 강도부사 / 시제 / 부정.
+  // Stacks multiplicatively with §9 / §10 / §12. Intentionally allowed to
+  // overlap with the §2 radical/compound system — same physical stroke can
+  // fire BOTH systems at once. {kind, runes, powerMul, instabilityDelta,
+  // detail, particleCount} — see particles.js.
+  particles: null,
   overloaded: false
 };
 
@@ -83,6 +93,8 @@ const valBoneInteraction = document.getElementById('val-bone-interaction');
 const boneInteractionDetail = document.getElementById('bone-interaction-detail');
 const valSentence = document.getElementById('val-sentence');
 const sentenceDetail = document.getElementById('sentence-detail');
+const valParticle = document.getElementById('val-particle');
+const particleDetail = document.getElementById('particle-detail');
 const systemStatus = document.getElementById('system-status');
 
 // Archive Elements
@@ -401,6 +413,7 @@ function castMagic() {
       arrangement: state.arrangement,
       boneInteraction: state.boneInteraction,
       sentence: state.sentence,
+      particles: state.particles,
     });
     if (judged.result === 'success') {
       ctx.fillStyle = 'rgba(0, 255, 153, 0.45)';
@@ -493,12 +506,13 @@ function clearCanvas() {
   state.heat = 0;
   state.instability = 0;
   state.currentCompound = null;
-  // Reset the §9/§10/§11-12 analyzer outputs too so the panels collapse to
-  // their empty state ('단일 룬' / '단순 뼈대' / '--') immediately on Clear
-  // instead of carrying over stale values from the previous canvas.
+  // Reset the §9/§10/§11-12/§11.2 analyzer outputs too so the panels collapse
+  // to their empty state ('단일 룬' / '단순 뼈대' / '--' / '없음') immediately
+  // on Clear instead of carrying over stale values from the previous canvas.
   state.arrangement = null;
   state.boneInteraction = null;
   state.sentence = null;
+  state.particles = null;
   updateAnalyzerUI();
 }
 
@@ -522,6 +536,7 @@ function undoLastStroke() {
     state.arrangement = null;
     state.boneInteraction = null;
     state.sentence = null;
+    state.particles = null;
     systemStatus.innerText = '대기 중...';
     systemStatus.style.color = '#fff';
     btnCastMagic.style.display = 'none';
@@ -689,6 +704,127 @@ function renderLoop() {
   requestAnimationFrame(renderLoop);
 }
 
+// Particle main-unit derivation (RUNE_DICTIONARY §11.2 integration).
+//
+// The upstream pipelines (recognition.js + arrangement.js + sentence.js)
+// classify any stroke that recognizes as a rune into its own main unit and
+// merge by spatial proximity, which causes two failure modes for particles:
+//
+//   (A) A clean small bar drawn *next to* a larger rune is recognized as
+//       its own main rune (e.g. 이사) and gets claimed → never fires as
+//       a particle.
+//   (B) A small bar drawn *through* a larger rune physically overlaps
+//       with it, so proximity clustering merges them into one cluster
+//       and arrangement detects a §2 compound. Particles never fire on
+//       the inner stroke either.
+//
+// This helper handles both by:
+//
+//   1. Run the standard proximity clustering as a coarse pass.
+//   2. Within each cluster, decompose by *structural endpoint connectivity*
+//      — strokes that share an endpoint within a tolerance are part of the
+//      same structural group (e.g. △'s three edges); strokes that don't are
+//      separate groups (e.g. a ㅡ drawn through △ doesn't share endpoints
+//      with the triangle, so it splits out).
+//   3. Compare group sizes: only groups whose bbox area is ≥30% of the
+//      largest group's area count as "main"; smaller groups are particle
+//      candidates regardless of whether they individually identify as runes.
+//   4. When all groups are comparable size (genuine multi-rune sentence)
+//      defer to sentence.mainUnits / arrangement.units so connector
+//      classification is preserved.
+function derivePerticleMainUnits({ runeStrokes, arrangement, sentence }) {
+  if (!runeStrokes || runeStrokes.length === 0) return [];
+  const clusters = clusterStrokesByProximity(runeStrokes);
+  if (!clusters || clusters.length === 0) return [];
+
+  // Decompose each proximity cluster by structural endpoint connectivity
+  // so a stroke that physically overlaps a main rune but doesn't share any
+  // endpoint with it (e.g. ㅡ drawn through ○) becomes its own group.
+  const groups = [];
+  for (const cluster of clusters) {
+    for (const g of decomposeByEndpointConnectivity(cluster)) groups.push(g);
+  }
+
+  // Compute bbox + size for each group. Use max(w,1)*max(h,1) instead of
+  // raw bbox area so 1D runes (이사 has bbox.w ≈ 0) aren't treated as zero.
+  const sized = groups.map(group => {
+    const bb = bboxOfStrokes(group);
+    const area = Math.max(bb.w, 1) * Math.max(bb.h, 1);
+    return { group, bb, area };
+  });
+  sized.sort((a, b) => b.area - a.area);
+
+  if (sized.length === 1) {
+    const { group, bb } = sized[0];
+    const name = recognizer.identifyRune(group) || '복합 룬';
+    return [{ name, bbox: bb, center: { x: bb.cx, y: bb.cy }, strokes: group }];
+  }
+
+  const dominantArea = sized[0].area;
+  const MAIN_AREA_RATIO = 0.30;
+
+  const mainBuckets = sized.filter(s => s.area >= dominantArea * MAIN_AREA_RATIO);
+
+  // If the upstream sentence already produced mainUnits and the dominance
+  // analysis says all groups are comparable size, prefer sentence.mainUnits
+  // (it has connector classification).
+  if (mainBuckets.length === sized.length) {
+    if (sentence && Array.isArray(sentence.mainUnits) && sentence.mainUnits.length > 0) {
+      return sentence.mainUnits;
+    }
+    if (arrangement && Array.isArray(arrangement.units) && arrangement.units.length > 0) {
+      return arrangement.units;
+    }
+  }
+
+  // Otherwise: only the dominant groups are main. Smaller ones are
+  // particle-sized and therefore NOT claimed → they become candidates.
+  return mainBuckets.map(({ group, bb }) => {
+    const name = recognizer.identifyRune(group) || '복합 룬';
+    return { name, bbox: bb, center: { x: bb.cx, y: bb.cy }, strokes: group };
+  });
+}
+
+// Decompose a list of strokes into structurally-connected groups using
+// shared endpoint proximity (within `endpointTol` pixels). Strokes that
+// share at least one endpoint with another stroke transitively form one
+// group. Used inside derivePerticleMainUnits to separate overlapping but
+// structurally-independent strokes (e.g. ㅡ drawn through ○).
+function decomposeByEndpointConnectivity(strokes, endpointTol = 18) {
+  if (!strokes || strokes.length <= 1) return strokes && strokes.length > 0 ? [strokes] : [];
+  const n = strokes.length;
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  const unite = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+  const tol2 = endpointTol * endpointTol;
+  const close = (p, q) => {
+    if (!p || !q) return false;
+    const dx = p.x - q.x, dy = p.y - q.y;
+    return dx * dx + dy * dy <= tol2;
+  };
+  for (let i = 0; i < n; i++) {
+    const sa = strokes[i];
+    if (!sa || sa.length === 0) continue;
+    const aStart = sa[0], aEnd = sa[sa.length - 1];
+    for (let j = i + 1; j < n; j++) {
+      const sb = strokes[j];
+      if (!sb || sb.length === 0) continue;
+      const bStart = sb[0], bEnd = sb[sb.length - 1];
+      if (close(aStart, bStart) || close(aStart, bEnd) ||
+          close(aEnd, bStart)   || close(aEnd, bEnd)) {
+        unite(i, j);
+      }
+    }
+  }
+  const buckets = new Map();
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    if (!buckets.has(r)) buckets.set(r, []);
+    buckets.get(r).push(strokes[i]);
+  }
+  return Array.from(buckets.values());
+}
+
 // Analysis Logic
 function analyzeCurrentState() {
   const allStrokes = [...state.strokes];
@@ -743,6 +879,32 @@ function analyzeCurrentState() {
     boneInteraction,
   });
   state.sentence = sentence;
+
+  // Particle system (RUNE_DICTIONARY §11.2). Stacks with arrangement /
+  // bone / sentence multiplicatively. By design also stacks with §2
+  // radical compounds (no exclusion logic) so the same drawing yields
+  // different cast behavior depending on which layer the player
+  // optimizes around.
+  //
+  // Main-unit derivation (intentionally NOT just `arrangement.units` /
+  // `sentence.mainUnits`): the upstream pipelines aggressively claim any
+  // recognizable stroke as a separate main rune (e.g. a clean vertical
+  // bar near a circle becomes 이사, blocking it from firing as 강화
+  // particle). Instead we re-cluster the rune strokes and treat clusters
+  // that are significantly smaller than the largest one as
+  // particle candidates regardless of whether they individually
+  // identify as runes. This is what unlocks 강화/극대/부정 etc. on real
+  // hand drawings.
+  const particleMainUnits = derivePerticleMainUnits({
+    runeStrokes,
+    arrangement,
+    sentence,
+  });
+  const particles = analyzeParticles({
+    runeStrokes,
+    mainUnits: particleMainUnits,
+  });
+  state.particles = particles;
 
   // Thermodynamics: Volume (V) = Area of Bones
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -806,9 +968,10 @@ function analyzeCurrentState() {
   const arrangementDelta = (state.arrangement && state.arrangement.instabilityDelta) || 0;
   const boneInteractionDelta = (state.boneInteraction && state.boneInteraction.instabilityDelta) || 0;
   const sentenceDelta = (state.sentence && state.sentence.instabilityDelta) || 0;
+  const particleDelta = (state.particles && state.particles.instabilityDelta) || 0;
   state.instability = Math.max(Math.min(
     baseInstability + analysis.instabilityModifier
-      + arrangementDelta + boneInteractionDelta + sentenceDelta,
+      + arrangementDelta + boneInteractionDelta + sentenceDelta + particleDelta,
     100), 0);
 
   // Overload reflects whether the current stroke set exceeds limits. Recompute
@@ -870,6 +1033,30 @@ function updateAnalyzerUI() {
       valBoneInteraction.style.color = '#666666';
       boneInteractionDetail.innerText = '';
       boneInteractionDetail.style.display = 'none';
+    }
+  }
+
+  // Particle panel (RUNE_DICTIONARY §11.2). Shows the resolved particle
+  // for each main rune (강도부사 ×N.N / 격조사 / 시제 / 부정). Stacks
+  // multiplicatively with the other layers; gold when net powerMul is
+  // amplifying (≥1.5) or runaway (×5), cyan when stabilizing (negative
+  // instability delta), red when negation zeroes the cast (×0).
+  if (valParticle && particleDetail) {
+    const p = state.particles;
+    if (p && p.kind === 'particle' && p.particleCount > 0) {
+      const mul = p.powerMul.toFixed(1);
+      valParticle.innerText = `${p.particleCount}개 ×${mul}`;
+      particleDetail.innerText = p.detail || '';
+      particleDetail.style.display = p.detail ? 'block' : 'none';
+      if (p.powerMul === 0) valParticle.style.color = '#ff3366';
+      else if (p.powerMul >= 1.5) valParticle.style.color = '#ffaa00';
+      else if (p.instabilityDelta < 0) valParticle.style.color = '#5fdfff';
+      else valParticle.style.color = '#cccccc';
+    } else {
+      valParticle.innerText = '없음';
+      valParticle.style.color = '#666666';
+      particleDetail.innerText = '';
+      particleDetail.style.display = 'none';
     }
   }
 
