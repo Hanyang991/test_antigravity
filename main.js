@@ -1,5 +1,6 @@
 import './style.css'
 import { RecognitionEngine } from './recognition.js'
+import { analyzeArrangement } from './arrangement.js'
 import { RiftGame } from './rift.js'
 
 const recognizer = new RecognitionEngine();
@@ -22,6 +23,11 @@ const state = {
   currentMeaning: '',
   currentDynamics: '',
   currentCompound: null, // non-null when two runes combined into a named effect
+  // Arrangement (RUNE_DICTIONARY §9): spatial layout of multiple runes →
+  // power multiplier + instability adjustment that stack on top of the
+  // single-rune / compound analysis. {kind, label, detail, powerMul,
+  // instabilityDelta, runeCount} — see arrangement.js.
+  arrangement: null,
   overloaded: false
 };
 
@@ -55,6 +61,8 @@ let lastAnalysis = null;
 const valResonance = document.getElementById('val-resonance');
 const valHeat = document.getElementById('val-heat');
 const valInstability = document.getElementById('val-instability');
+const valArrangement = document.getElementById('val-arrangement');
+const arrangementDetail = document.getElementById('arrangement-detail');
 const systemStatus = document.getElementById('system-status');
 
 // Archive Elements
@@ -598,6 +606,19 @@ function analyzeCurrentState() {
 
   const analysis = recognizer.analyzeRune(runeStrokes, boneStrokes);
 
+  // Arrangement (RUNE_DICTIONARY §9): when the player draws multiple runes,
+  // their *spatial layout* (linear / circular / triangular / radial / overlap
+  // / symmetric) modifies overall power and instability on top of the
+  // single-rune analysis above. Compound matches short-circuit to the
+  // 'overlapping' kind (×2.0) — see arrangement.js.
+  const arrangement = analyzeArrangement({
+    runeStrokes,
+    boneStrokes,
+    recognizer,
+    compoundName: analysis.compoundName,
+  });
+  state.arrangement = arrangement;
+
   // Thermodynamics: Volume (V) = Area of Bones
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   boneStrokes.forEach(stroke => {
@@ -651,7 +672,11 @@ function analyzeCurrentState() {
     baseInstability += 10;
   }
   
-  state.instability = Math.max(Math.min(baseInstability + analysis.instabilityModifier, 100), 0);
+  // Arrangement instability delta stacks on top of single-rune + compound
+  // bonuses. Triangular 균형 / 대칭 배열 lower it; radial / 원형 / 삼중 강화
+  // raise it. Clamped to [0, 100] like before.
+  const arrangementDelta = (state.arrangement && state.arrangement.instabilityDelta) || 0;
+  state.instability = Math.max(Math.min(baseInstability + analysis.instabilityModifier + arrangementDelta, 100), 0);
 
   // Overload reflects whether the current stroke set exceeds limits. Recompute
   // every analysis so removing a stroke (Undo) or pure clear can take the canvas
@@ -671,7 +696,29 @@ function updateAnalyzerUI() {
   valResonance.innerText = state.resonance.toFixed(1) + ' Hz';
   valHeat.innerText = state.heat + ' °C';
   valInstability.innerText = state.instability.toFixed(0) + '%';
-  
+
+  // Arrangement panel (RUNE_DICTIONARY §9). Hidden when no arrangement is
+  // active (single rune or no clusters). Color follows the kind: cool teal
+  // for stabilizing patterns (triangular / symmetric), warm gold for power
+  // multipliers ≥ 1.5 (circular / overlapping / 삼중 강화).
+  if (valArrangement && arrangementDetail) {
+    const a = state.arrangement;
+    if (a && a.kind && a.kind !== 'none') {
+      const mul = a.powerMul.toFixed(1);
+      valArrangement.innerText = `${a.label} ×${mul}`;
+      arrangementDetail.innerText = a.detail || '';
+      arrangementDetail.style.display = a.detail ? 'block' : 'none';
+      if (a.powerMul >= 1.5) valArrangement.style.color = '#ffaa00';
+      else if (a.instabilityDelta < 0) valArrangement.style.color = '#5fdfff';
+      else valArrangement.style.color = '#cccccc';
+    } else {
+      valArrangement.innerText = '단일 룬';
+      valArrangement.style.color = '#666666';
+      arrangementDetail.innerText = '';
+      arrangementDetail.style.display = 'none';
+    }
+  }
+
   
   // Compound runes — positional radical combinations like 열기△ + 대지ㅡ → 마그마 —
   // get a distinct gold tint and a 결합 label so the player learns to read them as
