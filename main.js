@@ -1,6 +1,7 @@
 import './style.css'
 import { RecognitionEngine } from './recognition.js'
 import { analyzeArrangement } from './arrangement.js'
+import { analyzeBoneInteraction } from './bone-interaction.js'
 import { RiftGame } from './rift.js'
 
 const recognizer = new RecognitionEngine();
@@ -28,6 +29,12 @@ const state = {
   // single-rune / compound analysis. {kind, label, detail, powerMul,
   // instabilityDelta, runeCount} — see arrangement.js.
   arrangement: null,
+  // Bone × Rune interaction (RUNE_DICTIONARY §10): how the bone strokes
+  // spatially relate to the rune (가두기 / 걸치기 / 관통 / 받치기 / …) →
+  // additional power multiplier and instability delta independent of §9.
+  // {kind, label, detail, shape, powerMul, instabilityDelta}
+  // — see bone-interaction.js.
+  boneInteraction: null,
   overloaded: false
 };
 
@@ -63,6 +70,8 @@ const valHeat = document.getElementById('val-heat');
 const valInstability = document.getElementById('val-instability');
 const valArrangement = document.getElementById('val-arrangement');
 const arrangementDetail = document.getElementById('arrangement-detail');
+const valBoneInteraction = document.getElementById('val-bone-interaction');
+const boneInteractionDetail = document.getElementById('bone-interaction-detail');
 const systemStatus = document.getElementById('system-status');
 
 // Archive Elements
@@ -314,10 +323,12 @@ function castMagic() {
         meaning: state.currentMeaning,
         compoundName: state.currentCompound,
       }),
-      // Pass the current arrangement so rift.cast() can scale reward + threat
-      // relief by powerMul (RUNE_DICTIONARY §9). 단일 룬 / null arrangement
-      // collapses to ×1.0 inside cast() so no special-casing here.
+      // Pass the current arrangement (RUNE_DICTIONARY §9) and bone interaction
+      // (§10) so rift.cast() can scale reward + threat relief by their combined
+      // powerMul. 단일 룬 / 단순 뼈대 (kind='none') collapse to ×1.0 inside
+      // cast() so no special-casing here.
       arrangement: state.arrangement,
+      boneInteraction: state.boneInteraction,
     });
     if (judged.result === 'success') {
       ctx.fillStyle = 'rgba(0, 255, 153, 0.45)';
@@ -625,6 +636,21 @@ function analyzeCurrentState() {
   });
   state.arrangement = arrangement;
 
+  // Bone × Rune interaction (RUNE_DICTIONARY §10). Independent of arrangement;
+  // both stack on the final cast power. boneFirst is true when the first bone
+  // stroke in state.strokes precedes the first rune stroke (so we know whether
+  // the player drew the structural bone first → 받치기) — checked against the
+  // ordered stroke list, not the filtered arrays.
+  const firstBoneIdx = allStrokes.findIndex(s => s.length > 0 && s[0].mode === 'bone');
+  const firstRuneIdx = allStrokes.findIndex(s => s.length > 0 && s[0].mode === 'rune');
+  const boneFirst = firstBoneIdx >= 0 && firstRuneIdx >= 0 && firstBoneIdx < firstRuneIdx;
+  const boneInteraction = analyzeBoneInteraction({
+    runeStrokes,
+    boneStrokes,
+    boneFirst,
+  });
+  state.boneInteraction = boneInteraction;
+
   // Thermodynamics: Volume (V) = Area of Bones
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   boneStrokes.forEach(stroke => {
@@ -680,9 +706,11 @@ function analyzeCurrentState() {
   
   // Arrangement instability delta stacks on top of single-rune + compound
   // bonuses. Triangular 균형 / 대칭 배열 lower it; radial / 원형 / 삼중 강화
-  // raise it. Clamped to [0, 100] like before.
+  // raise it. Bone interaction (§10) stacks too — 결계 (square enclosing)
+  // lowers, 십자 걸치기 / 공명 raise. All clamped to [0, 100].
   const arrangementDelta = (state.arrangement && state.arrangement.instabilityDelta) || 0;
-  state.instability = Math.max(Math.min(baseInstability + analysis.instabilityModifier + arrangementDelta, 100), 0);
+  const boneInteractionDelta = (state.boneInteraction && state.boneInteraction.instabilityDelta) || 0;
+  state.instability = Math.max(Math.min(baseInstability + analysis.instabilityModifier + arrangementDelta + boneInteractionDelta, 100), 0);
 
   // Overload reflects whether the current stroke set exceeds limits. Recompute
   // every analysis so removing a stroke (Undo) or pure clear can take the canvas
@@ -722,6 +750,27 @@ function updateAnalyzerUI() {
       valArrangement.style.color = '#666666';
       arrangementDetail.innerText = '';
       arrangementDetail.style.display = 'none';
+    }
+  }
+
+  // Bone × Rune interaction panel (RUNE_DICTIONARY §10). Same color
+  // convention as arrangement: warm gold for amplifiers (×1.5+), cool teal
+  // for stabilizers (negative instability delta), gray for none.
+  if (valBoneInteraction && boneInteractionDetail) {
+    const b = state.boneInteraction;
+    if (b && b.kind && b.kind !== 'none') {
+      const mul = b.powerMul.toFixed(1);
+      valBoneInteraction.innerText = `${b.label} ×${mul}`;
+      boneInteractionDetail.innerText = b.detail || '';
+      boneInteractionDetail.style.display = b.detail ? 'block' : 'none';
+      if (b.powerMul >= 1.5) valBoneInteraction.style.color = '#ffaa00';
+      else if (b.instabilityDelta < 0) valBoneInteraction.style.color = '#5fdfff';
+      else valBoneInteraction.style.color = '#cccccc';
+    } else {
+      valBoneInteraction.innerText = '단순 뼈대';
+      valBoneInteraction.style.color = '#666666';
+      boneInteractionDetail.innerText = '';
+      boneInteractionDetail.style.display = 'none';
     }
   }
 

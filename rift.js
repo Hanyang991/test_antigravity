@@ -171,11 +171,12 @@ export class RiftGame {
     }
 
     // Called when the user clicks Cast. `analysis` is the recognizer output for
-    // the current canvas: { meaning, compoundName, arrangement, ... }. Returns a
-    // result object so main.js can play a corresponding visual cue. When the
-    // analyzer reports a non-trivial arrangement (RUNE_DICTIONARY §9), its
-    // `powerMul` scales both score reward and threat relief — so a bone-triangle
-    // 삼중 강화 (×2.0) literally hits twice as hard as a plain solo cast.
+    // the current canvas: { meaning, compoundName, arrangement, boneInteraction,
+    // ... }. Returns a result object so main.js can play a corresponding visual
+    // cue. When the analyzer reports a non-trivial arrangement (§9) and/or
+    // bone interaction (§10), their powerMuls multiply together and scale both
+    // score reward and threat relief — so a bone-triangle 삼중 강화 (×2.0)
+    // inside a rhombus 공명 (×1.8) hits 3.6× as hard as a plain solo cast.
     cast(analysis) {
         if (this.status !== 'active' || !this.demand) {
             return { result: 'idle' };
@@ -183,7 +184,10 @@ export class RiftGame {
 
         const matched = this._matches(analysis, this.demand);
         const arr = analysis && analysis.arrangement;
-        const powerMul = (arr && typeof arr.powerMul === 'number') ? arr.powerMul : 1.0;
+        const bone = analysis && analysis.boneInteraction;
+        const arrMul = (arr && typeof arr.powerMul === 'number') ? arr.powerMul : 1.0;
+        const boneMul = (bone && typeof bone.powerMul === 'number') ? bone.powerMul : 1.0;
+        const powerMul = arrMul * boneMul;
         if (matched) {
             const level = levelFor(this.score);
             const isCompound = this.demand.compound === true;
@@ -193,9 +197,18 @@ export class RiftGame {
             const totalRelief = baseRelief * powerMul;
             this.score += totalReward;
             this.threat = Math.max(0, this.threat - totalRelief);
-            const bonus = (arr && arr.kind && arr.kind !== 'none' && powerMul !== 1.0)
-                ? ` [${arr.label} ×${powerMul.toFixed(1)}]`
-                : '';
+            // Build a single bonus tag listing each contributor that's not ×1.0,
+            // so the player sees what scaled the cast (and how the two systems
+            // interacted): "[삼각 배열 ×2.0 · 공명 ×1.8]".
+            const tags = [];
+            if (arr && arr.kind && arr.kind !== 'none' && arrMul !== 1.0) {
+                tags.push(`${arr.label} ×${arrMul.toFixed(1)}`);
+            }
+            if (bone && bone.kind && bone.kind !== 'none' && boneMul !== 1.0) {
+                const detail = bone.detail ? ` ${bone.detail}` : '';
+                tags.push(`${bone.label}${detail} ×${boneMul.toFixed(1)}`);
+            }
+            const bonus = tags.length > 0 ? ` [${tags.join(' · ')}]` : '';
             this.message = `${this.demand.label} 봉합 성공!${bonus} +${totalReward}점`;
             this.lastResult = 'success';
             this._newDemand();
