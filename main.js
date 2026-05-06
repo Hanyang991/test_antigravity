@@ -309,9 +309,15 @@ function castMagic() {
   // This intentionally happens BEFORE the canvas wipe so the analyzer state we
   // pass in still reflects what the player drew.
   if (riftGame.status === 'active') {
-    const judged = riftGame.cast(lastAnalysis || {
-      meaning: state.currentMeaning,
-      compoundName: state.currentCompound
+    const judged = riftGame.cast({
+      ...(lastAnalysis || {
+        meaning: state.currentMeaning,
+        compoundName: state.currentCompound,
+      }),
+      // Pass the current arrangement so rift.cast() can scale reward + threat
+      // relief by powerMul (RUNE_DICTIONARY §9). 단일 룬 / null arrangement
+      // collapses to ×1.0 inside cast() so no special-casing here.
+      arrangement: state.arrangement,
     });
     if (judged.result === 'success') {
       ctx.fillStyle = 'rgba(0, 255, 153, 0.45)';

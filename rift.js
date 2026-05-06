@@ -171,25 +171,35 @@ export class RiftGame {
     }
 
     // Called when the user clicks Cast. `analysis` is the recognizer output for
-    // the current canvas: { meaning, compoundName, ... }. Returns a result
-    // object so main.js can play a corresponding visual cue.
+    // the current canvas: { meaning, compoundName, arrangement, ... }. Returns a
+    // result object so main.js can play a corresponding visual cue. When the
+    // analyzer reports a non-trivial arrangement (RUNE_DICTIONARY §9), its
+    // `powerMul` scales both score reward and threat relief — so a bone-triangle
+    // 삼중 강화 (×2.0) literally hits twice as hard as a plain solo cast.
     cast(analysis) {
         if (this.status !== 'active' || !this.demand) {
             return { result: 'idle' };
         }
 
         const matched = this._matches(analysis, this.demand);
+        const arr = analysis && analysis.arrangement;
+        const powerMul = (arr && typeof arr.powerMul === 'number') ? arr.powerMul : 1.0;
         if (matched) {
             const level = levelFor(this.score);
             const isCompound = this.demand.compound === true;
-            const reward = isCompound ? 60 : 30;
-            const threatRelief = isCompound ? 35 : 25;
-            this.score += reward + level * 5;
-            this.threat = Math.max(0, this.threat - threatRelief);
-            this.message = `${this.demand.label} 봉합 성공! +${reward + level * 5}점`;
+            const baseReward = isCompound ? 60 : 30;
+            const baseRelief = isCompound ? 35 : 25;
+            const totalReward = Math.round((baseReward + level * 5) * powerMul);
+            const totalRelief = baseRelief * powerMul;
+            this.score += totalReward;
+            this.threat = Math.max(0, this.threat - totalRelief);
+            const bonus = (arr && arr.kind && arr.kind !== 'none' && powerMul !== 1.0)
+                ? ` [${arr.label} ×${powerMul.toFixed(1)}]`
+                : '';
+            this.message = `${this.demand.label} 봉합 성공!${bonus} +${totalReward}점`;
             this.lastResult = 'success';
             this._newDemand();
-            return { result: 'success', score: this.score };
+            return { result: 'success', score: this.score, powerMul };
         }
 
         // Wrong cast — heavier penalty than passive drift but lighter than expire.
