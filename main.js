@@ -13,17 +13,12 @@
 // that (M1 in todo.md). The local `state` object below only tracks transient
 // canvas/input state.
 import './style.css'
-import { RecognitionEngine, __INTERNAL__ as RECOGNITION_INTERNAL } from './recognition.js'
-import { analyzeArrangement } from './arrangement.js'
-import { analyzeBoneInteraction } from './bone-interaction.js'
-import { analyzeSentence } from './sentence.js'
-import { analyzeParticles } from './particles.js'
+import { RecognitionEngine } from './recognition.js'
 import { RiftGame } from './rift.js'
+import { analyzeMagic } from './magicPipeline.js'
 import { gameState } from './gameState.js'
 import { loadGame, saveGame, clearSave } from './saveLoad.js'
 import * as eventBus from './eventBus.js'
-
-const { bboxOfStrokes, clusterStrokesByProximity } = RECOGNITION_INTERNAL;
 
 const recognizer = new RecognitionEngine();
 const riftGame = new RiftGame();
@@ -445,28 +440,32 @@ function castMagic() {
     riftContainer.style.animation = 'pulse 0.5s ease-out 3';
   }, 10);
 
+  // Build a rift-shaped view of the analysis. The rift game predates the
+  // pipeline and reads `analysis.boneInteraction.powerMul` directly; we keep
+  // that contract by aliasing `bone` → `boneInteraction` and forwarding
+  // legacy.meaning / legacy.compoundName onto the top level.
+  const a = lastAnalysis;
+  const riftAnalysis = a ? {
+    meaning: a.legacy.meaning,
+    compoundName: a.legacy.compoundName,
+    arrangement: a.arrangement,
+    boneInteraction: a.bone,
+    sentence: a.sentence,
+    particles: a.particles,
+  } : {
+    meaning: state.currentMeaning,
+    compoundName: state.currentCompound,
+  };
+
+  let castResult = null;
   // When the Rift game is active, judge the cast against the current demand.
   // This intentionally happens BEFORE the canvas wipe so the analyzer state we
   // pass in still reflects what the player drew.
   if (riftGame.status === 'active') {
-    const judged = riftGame.cast({
-      ...(lastAnalysis || {
-        meaning: state.currentMeaning,
-        compoundName: state.currentCompound,
-      }),
-      // Pass the current arrangement (RUNE_DICTIONARY §9), bone interaction
-      // (§10), and sentence grammar (§§11-12) so rift.cast() can scale reward
-      // + threat relief by their combined powerMul. 단일 룬 / 단순 뼈대 /
-      // 단어 (kind='none' or 'word') collapse to ×1.0 inside cast() so no
-      // special-casing here.
-      arrangement: state.arrangement,
-      boneInteraction: state.boneInteraction,
-      sentence: state.sentence,
-      particles: state.particles,
-    });
-    if (judged.result === 'success') {
+    castResult = riftGame.cast(riftAnalysis);
+    if (castResult.result === 'success') {
       ctx.fillStyle = 'rgba(0, 255, 153, 0.45)';
-    } else if (judged.result === 'wrong') {
+    } else if (castResult.result === 'wrong') {
       ctx.fillStyle = 'rgba(255, 51, 102, 0.45)';
     } else {
       ctx.fillStyle = 'rgba(138, 43, 226, 0.45)';
@@ -476,6 +475,18 @@ function castMagic() {
     systemStatus.innerText = `[마법 주입!] ${state.currentMeaning}이(가) 균열로 빨려들어갑니다!`;
     systemStatus.style.color = '#fff';
     ctx.fillStyle = 'rgba(138, 43, 226, 0.5)';
+  }
+
+  // Loose-coupled broadcast so M6 / M7 / M8 can record discoveries, papers,
+  // and economy events without main.js needing to know about them.
+  if (a) {
+    eventBus.emit(eventBus.Events.MAGIC_CAST, {
+      analysis: a,
+      week: gameState.progression?.currentWeek ?? 0,
+      day: gameState.progression?.currentDay ?? 0,
+      riftActive: riftGame.status === 'active',
+      castResult,
+    });
   }
 
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -755,128 +766,14 @@ function renderLoop() {
   requestAnimationFrame(renderLoop);
 }
 
-// Particle main-unit derivation (RUNE_DICTIONARY §11.2 integration).
-//
-// The upstream pipelines (recognition.js + arrangement.js + sentence.js)
-// classify any stroke that recognizes as a rune into its own main unit and
-// merge by spatial proximity, which causes two failure modes for particles:
-//
-//   (A) A clean small bar drawn *next to* a larger rune is recognized as
-//       its own main rune (e.g. 이사) and gets claimed → never fires as
-//       a particle.
-//   (B) A small bar drawn *through* a larger rune physically overlaps
-//       with it, so proximity clustering merges them into one cluster
-//       and arrangement detects a §2 compound. Particles never fire on
-//       the inner stroke either.
-//
-// This helper handles both by:
-//
-//   1. Run the standard proximity clustering as a coarse pass.
-//   2. Within each cluster, decompose by *structural endpoint connectivity*
-//      — strokes that share an endpoint within a tolerance are part of the
-//      same structural group (e.g. △'s three edges); strokes that don't are
-//      separate groups (e.g. a ㅡ drawn through △ doesn't share endpoints
-//      with the triangle, so it splits out).
-//   3. Compare group sizes: only groups whose bbox area is ≥30% of the
-//      largest group's area count as "main"; smaller groups are particle
-//      candidates regardless of whether they individually identify as runes.
-//   4. When all groups are comparable size (genuine multi-rune sentence)
-//      defer to sentence.mainUnits / arrangement.units so connector
-//      classification is preserved.
-function derivePerticleMainUnits({ runeStrokes, arrangement, sentence }) {
-  if (!runeStrokes || runeStrokes.length === 0) return [];
-  const clusters = clusterStrokesByProximity(runeStrokes);
-  if (!clusters || clusters.length === 0) return [];
-
-  // Decompose each proximity cluster by structural endpoint connectivity
-  // so a stroke that physically overlaps a main rune but doesn't share any
-  // endpoint with it (e.g. ㅡ drawn through ○) becomes its own group.
-  const groups = [];
-  for (const cluster of clusters) {
-    for (const g of decomposeByEndpointConnectivity(cluster)) groups.push(g);
-  }
-
-  // Compute bbox + size for each group. Use max(w,1)*max(h,1) instead of
-  // raw bbox area so 1D runes (이사 has bbox.w ≈ 0) aren't treated as zero.
-  const sized = groups.map(group => {
-    const bb = bboxOfStrokes(group);
-    const area = Math.max(bb.w, 1) * Math.max(bb.h, 1);
-    return { group, bb, area };
-  });
-  sized.sort((a, b) => b.area - a.area);
-
-  if (sized.length === 1) {
-    const { group, bb } = sized[0];
-    const name = recognizer.identifyRune(group) || '복합 룬';
-    return [{ name, bbox: bb, center: { x: bb.cx, y: bb.cy }, strokes: group }];
-  }
-
-  const dominantArea = sized[0].area;
-  const MAIN_AREA_RATIO = 0.30;
-
-  const mainBuckets = sized.filter(s => s.area >= dominantArea * MAIN_AREA_RATIO);
-
-  // If the upstream sentence already produced mainUnits and the dominance
-  // analysis says all groups are comparable size, prefer sentence.mainUnits
-  // (it has connector classification).
-  if (mainBuckets.length === sized.length) {
-    if (sentence && Array.isArray(sentence.mainUnits) && sentence.mainUnits.length > 0) {
-      return sentence.mainUnits;
-    }
-    if (arrangement && Array.isArray(arrangement.units) && arrangement.units.length > 0) {
-      return arrangement.units;
-    }
-  }
-
-  // Otherwise: only the dominant groups are main. Smaller ones are
-  // particle-sized and therefore NOT claimed → they become candidates.
-  return mainBuckets.map(({ group, bb }) => {
-    const name = recognizer.identifyRune(group) || '복합 룬';
-    return { name, bbox: bb, center: { x: bb.cx, y: bb.cy }, strokes: group };
-  });
-}
-
-// Decompose a list of strokes into structurally-connected groups using
-// shared endpoint proximity (within `endpointTol` pixels). Strokes that
-// share at least one endpoint with another stroke transitively form one
-// group. Used inside derivePerticleMainUnits to separate overlapping but
-// structurally-independent strokes (e.g. ㅡ drawn through ○).
-function decomposeByEndpointConnectivity(strokes, endpointTol = 18) {
-  if (!strokes || strokes.length <= 1) return strokes && strokes.length > 0 ? [strokes] : [];
-  const n = strokes.length;
-  const parent = Array.from({ length: n }, (_, i) => i);
-  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
-  const unite = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
-  const tol2 = endpointTol * endpointTol;
-  const close = (p, q) => {
-    if (!p || !q) return false;
-    const dx = p.x - q.x, dy = p.y - q.y;
-    return dx * dx + dy * dy <= tol2;
-  };
-  for (let i = 0; i < n; i++) {
-    const sa = strokes[i];
-    if (!sa || sa.length === 0) continue;
-    const aStart = sa[0], aEnd = sa[sa.length - 1];
-    for (let j = i + 1; j < n; j++) {
-      const sb = strokes[j];
-      if (!sb || sb.length === 0) continue;
-      const bStart = sb[0], bEnd = sb[sb.length - 1];
-      if (close(aStart, bStart) || close(aStart, bEnd) ||
-          close(aEnd, bStart)   || close(aEnd, bEnd)) {
-        unite(i, j);
-      }
-    }
-  }
-  const buckets = new Map();
-  for (let i = 0; i < n; i++) {
-    const r = find(i);
-    if (!buckets.has(r)) buckets.set(r, []);
-    buckets.get(r).push(strokes[i]);
-  }
-  return Array.from(buckets.values());
-}
 
 // Analysis Logic
+//
+// All heavy lifting (recognition / arrangement / bone-interaction / sentence /
+// particles / thermodynamics / signature) lives in magicPipeline.js so the
+// rest of the game can read a single canonical MagicAnalysis object instead
+// of poking at transient `state` fields. We mirror back-compat fields onto
+// `state.*` here so the existing UI and Rift game keep working unchanged.
 function analyzeCurrentState() {
   const allStrokes = [...state.strokes];
   if (state.isDrawing && state.currentStroke.length > 0) {
@@ -886,158 +783,39 @@ function analyzeCurrentState() {
   const runeStrokes = allStrokes.filter(s => s.length > 0 && s[0].mode === 'rune');
   const boneStrokes = allStrokes.filter(s => s.length > 0 && s[0].mode === 'bone');
 
-  let boneLines = boneStrokes.length;
-  let runeLines = runeStrokes.length;
-
-  const analysis = recognizer.analyzeRune(runeStrokes, boneStrokes);
-
-  // Arrangement (RUNE_DICTIONARY §9): when the player draws multiple runes,
-  // their *spatial layout* (linear / circular / triangular / radial / overlap
-  // / symmetric) modifies overall power and instability on top of the
-  // single-rune analysis above. Compound matches short-circuit to the
-  // 'overlapping' kind (×2.0) — see arrangement.js.
-  const arrangement = analyzeArrangement({
+  const analysis = analyzeMagic({
     runeStrokes,
     boneStrokes,
+    allStrokes,
+    material: state.material,
+    assistMode: state.assistMode || 'free',
     recognizer,
-    compoundName: analysis.compoundName,
   });
-  state.arrangement = arrangement;
-
-  // Bone × Rune interaction (RUNE_DICTIONARY §10). Independent of arrangement;
-  // both stack on the final cast power. boneFirst is true when the first bone
-  // stroke in state.strokes precedes the first rune stroke (so we know whether
-  // the player drew the structural bone first → 받치기) — checked against the
-  // ordered stroke list, not the filtered arrays.
-  const firstBoneIdx = allStrokes.findIndex(s => s.length > 0 && s[0].mode === 'bone');
-  const firstRuneIdx = allStrokes.findIndex(s => s.length > 0 && s[0].mode === 'rune');
-  const boneFirst = firstBoneIdx >= 0 && firstRuneIdx >= 0 && firstBoneIdx < firstRuneIdx;
-  const boneInteraction = analyzeBoneInteraction({
-    runeStrokes,
-    boneStrokes,
-    boneFirst,
-  });
-  state.boneInteraction = boneInteraction;
-
-  // Sentence-level grammar (RUNE_DICTIONARY §§11-12). Reuses the arrangement's
-  // identified rune units to classify connector runes (대지/이사/게보/+/</+/◇),
-  // sentence grade by main-rune count, and reading direction. Stacks its own
-  // powerMul × instabilityDelta on top of arrangement and bone interaction.
-  const sentence = analyzeSentence({
-    runeStrokes,
-    recognizer,
-    arrangement,
-    boneInteraction,
-  });
-  state.sentence = sentence;
-
-  // Particle system (RUNE_DICTIONARY §11.2). Stacks with arrangement /
-  // bone / sentence multiplicatively. By design also stacks with §2
-  // radical compounds (no exclusion logic) so the same drawing yields
-  // different cast behavior depending on which layer the player
-  // optimizes around.
-  //
-  // Main-unit derivation (intentionally NOT just `arrangement.units` /
-  // `sentence.mainUnits`): the upstream pipelines aggressively claim any
-  // recognizable stroke as a separate main rune (e.g. a clean vertical
-  // bar near a circle becomes 이사, blocking it from firing as 강화
-  // particle). Instead we re-cluster the rune strokes and treat clusters
-  // that are significantly smaller than the largest one as
-  // particle candidates regardless of whether they individually
-  // identify as runes. This is what unlocks 강화/극대/부정 etc. on real
-  // hand drawings.
-  const particleMainUnits = derivePerticleMainUnits({
-    runeStrokes,
-    arrangement,
-    sentence,
-  });
-  const particles = analyzeParticles({
-    runeStrokes,
-    mainUnits: particleMainUnits,
-  });
-  state.particles = particles;
-
-  // Thermodynamics: Volume (V) = Area of Bones
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  boneStrokes.forEach(stroke => {
-    stroke.forEach(pt => {
-      if(pt.x < minX) minX = pt.x;
-      if(pt.y < minY) minY = pt.y;
-      if(pt.x > maxX) maxX = pt.x;
-      if(pt.y > maxY) maxY = pt.y;
-    });
-  });
-  
-  let volume = 1;
-  if (minX !== Infinity) {
-    volume = Math.max(((maxX - minX) * (maxY - minY)) / 10000, 1);
-  }
-
-  // Thermodynamics: Density (n)
-  let density = 0;
-  runeStrokes.forEach(stroke => {
-    density += stroke.length;
-  });
-
-  // Calculate Heat based on drawing speed (Resistance Heat = I^2R)
-  let newHeat = 0;
-  allStrokes.forEach(stroke => {
-    if (stroke.length > 5) {
-       const timeTaken = stroke[stroke.length-1].t - stroke[0].t;
-       if (timeTaken > 0) {
-         const speed = stroke.length / timeTaken; // Points per ms
-         // Fast speed = high resistance = high heat
-         newHeat += speed * 500;
-       }
-    }
-  });
-
-  state.resonance = Math.min(boneLines * 12.5, 100);
-  state.heat = Math.floor(newHeat + (analysis.radicals.length * 50));
-  
-  // Thermodynamics: Pressure (P) = (n * T) / V
-  state.pressure = Math.floor((density * Math.max(state.heat, 1)) / (volume * 10));
-
-  let baseInstability = (state.pressure * 0.1) + (state.heat * 0.05) - (state.resonance * 0.5);
-  
-  // Material Modifiers
-  let maxHeat = 150;
-  if (state.material === 'obsidian') {
-    maxHeat = 9999;
-    baseInstability -= 20; // Obsidian is very stable
-  } else if (state.material === 'water') {
-    maxHeat = 300;
-    baseInstability += 10;
-  }
-  
-  // Arrangement instability delta stacks on top of single-rune + compound
-  // bonuses. Triangular 균형 / 대칭 배열 lower it; radial / 원형 / 삼중 강화
-  // raise it. Bone interaction (§10) stacks too — 결계 (square enclosing)
-  // lowers, 십자 걸치기 / 공명 raise. Sentence grade (§12) adds another delta
-  // — 절 +15, 문장 +30, 주문 +50 (all reflect higher-grade spells being more
-  // unstable). All clamped to [0, 100].
-  const arrangementDelta = (state.arrangement && state.arrangement.instabilityDelta) || 0;
-  const boneInteractionDelta = (state.boneInteraction && state.boneInteraction.instabilityDelta) || 0;
-  const sentenceDelta = (state.sentence && state.sentence.instabilityDelta) || 0;
-  const particleDelta = (state.particles && state.particles.instabilityDelta) || 0;
-  state.instability = Math.max(Math.min(
-    baseInstability + analysis.instabilityModifier
-      + arrangementDelta + boneInteractionDelta + sentenceDelta + particleDelta,
-    100), 0);
-
-  // Overload reflects whether the current stroke set exceeds limits. Recompute
-  // every analysis so removing a stroke (Undo) or pure clear can take the canvas
-  // out of overload without an explicit reset, and so the OVERLOAD overlay can't
-  // be left stuck on top of a perfectly safe heat/instability reading.
-  state.overloaded = state.heat > maxHeat || state.instability >= 100;
-
-  state.currentMeaning = analysis.meaning;
-  state.currentDynamics = analysis.dynamics;
-  state.currentCompound = analysis.compoundName || null;
   lastAnalysis = analysis;
 
+  // Mirror onto state.* for back-compat with existing UI / rift.cast() code.
+  // New systems (M6 discovery, M7 papers, …) should consume `lastAnalysis`
+  // / the 'magic:analyzed' event payload instead.
+  state.arrangement       = analysis.arrangement;
+  state.boneInteraction   = analysis.bone;
+  state.sentence          = analysis.sentence;
+  state.particles         = analysis.particles;
+  state.resonance         = analysis.observables.resonance;
+  state.heat              = analysis.observables.heat;
+  state.pressure          = analysis.observables.pressure;
+  state.instability       = analysis.observables.instability;
+  state.overloaded        = analysis.observables.overloaded;
+  state.currentMeaning    = analysis.legacy.meaning;
+  state.currentDynamics   = analysis.legacy.dynamics;
+  state.currentCompound   = analysis.legacy.compoundName;
+
   updateAnalyzerUI();
+
+  // Loose-coupled broadcast so M6 (labNotebook) / M7 (papers) / M8 (economy)
+  // can react without main.js needing to know about them.
+  eventBus.emit(eventBus.Events.MAGIC_ANALYZED, analysis);
 }
+
 
 function updateAnalyzerUI() {
   valResonance.innerText = state.resonance.toFixed(1) + ' Hz';
