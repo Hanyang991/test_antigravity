@@ -508,28 +508,39 @@ function clamp(v, lo, hi) {
  * as a "bridging" interaction between two rune clusters) become structural
  * links; §11 connector runes (대지/이사/게보/나우디즈/케나즈/다가즈) become
  * grammatical operators.
+ *
+ * `bone.links` is the M3 adapter shape — a list of every connector span the
+ * bridging analyzer detected, each with its own `lineType` (raw §10 key:
+ * 단선/이중선/삼중선/점선/파선/물결선/나선/갈래선/고리선). Older callers /
+ * fixtures that returned a single bridging interaction without a `links`
+ * array fall back to `bone.lineType` so the signature still captures the
+ * connector classification.
  */
 function buildConnectors({ bone, sentence }) {
   const links = [];
-  if (bone && Array.isArray(bone.links)) {
+  if (bone && Array.isArray(bone.links) && bone.links.length > 0) {
     for (const link of bone.links) {
       links.push({
         type: 'bone-line',
-        lineType: link.lineType ?? link.type ?? null,
-        label: link.label ?? '',
+        lineType: link.lineType ?? null,
+        label: link.lineLabel ?? link.label ?? '',
         powerMul: numberOr(link.powerMul, 1.0),
+        instabilityDelta: numberOr(link.instabilityDelta, 0),
+        bridgeCount: link.bridgeCount ?? null,
         endpoints: link.endpoints ?? [],
       });
     }
-  } else if (bone && bone.kind === 'connector') {
-    // Older bone-interaction shapes that returned a single connector kind
-    // without a `links` array. Still record one entry so the signature
-    // captures the bridging.
+  } else if (bone && bone.kind === 'bridging') {
+    // Bridging detected but no `links` array — synthesize one from the
+    // top-level fields so signature inputs stay consistent with the
+    // `links`-aware path.
     links.push({
       type: 'bone-line',
-      lineType: bone.shape ?? null,
-      label: bone.label ?? '',
+      lineType: bone.lineType ?? null,
+      label: bone.lineLabel ?? bone.detail ?? bone.label ?? '',
       powerMul: numberOr(bone.powerMul, 1.0),
+      instabilityDelta: numberOr(bone.instabilityDelta, 0),
+      bridgeCount: bone.bridgeCount ?? null,
     });
   }
 

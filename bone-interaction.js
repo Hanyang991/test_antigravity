@@ -36,7 +36,7 @@
 //                          so that a perfectly-closed circle still reads as
 //                          봉인 (Enclosing) rather than a 1-turn 감싸기.
 //
-// Output shape (returned to main.js):
+// Output shape (returned to main.js / magicPipeline.js):
 //   {
 //     kind: 'enclosing'|'crossing'|'piercing'|'underlying'|'bridging'
 //          |'wrapping'|'none',
@@ -47,6 +47,20 @@
 //     instabilityDelta: number,             // stacks on top of arrangement
 //     bridgeCount?: number,                 // bridging only: connector count
 //     turns?: number,                       // wrapping only: bone winding turns
+//
+//     // M3 connector adapter — only present on kind='bridging'. lineType
+//     // is the raw §10 connector key (단선·이중선·삼중선·점선·파선·물결
+//     // 선·나선·갈래선·고리선); lineLabel mirrors the human caption that's
+//     // also in `detail`. `links` carries one entry per detected bridging
+//     // span so magicPipeline.connectors.links can populate without a second
+//     // pass. Future multi-bridge support can append more entries here.
+//     lineType?: string,
+//     lineLabel?: string,
+//     links?: Array<{
+//       lineType: string, lineLabel: string,
+//       powerMul: number, instabilityDelta: number,
+//       bridgeCount: number,
+//     }>,
 //   }
 //
 // Multiplier and instability values come straight out of the dictionary
@@ -542,15 +556,26 @@ function analyzeBridging({ runeStrokes, boneStrokes }) {
                 if (ij.length > 0) reaches.push(j);
             }
             if (reaches.length >= 2) {
-                const t = BRIDGE_TABLE.갈래선;
+                const lineType = '갈래선';
+                const t = BRIDGE_TABLE[lineType];
+                const detail = `${t.detail} · ${reaches.length}갈래`;
                 return {
                     kind: 'bridging',
                     label: '연결',
-                    detail: `${t.detail} · ${reaches.length}갈래`,
+                    detail,
                     shape: 'line',
                     powerMul: t.powerMul,
                     instabilityDelta: t.instabilityDelta,
                     bridgeCount: reaches.length,
+                    lineType,
+                    lineLabel: t.detail,
+                    links: [{
+                        lineType,
+                        lineLabel: t.detail,
+                        powerMul: t.powerMul,
+                        instabilityDelta: t.instabilityDelta,
+                        bridgeCount: reaches.length,
+                    }],
                 };
             }
         }
@@ -568,9 +593,9 @@ function analyzeBridging({ runeStrokes, boneStrokes }) {
             const B = boxes[order[j]];
             const bridges = bridgingStrokes(boneStrokes, A, B);
             if (bridges.length === 0) continue;
-            const kind = classifyConnector(bridges, A, B);
-            if (!kind) continue;
-            const t = BRIDGE_TABLE[kind];
+            const lineType = classifyConnector(bridges, A, B);
+            if (!lineType) continue;
+            const t = BRIDGE_TABLE[lineType];
             return {
                 kind: 'bridging',
                 label: '연결',
@@ -579,6 +604,15 @@ function analyzeBridging({ runeStrokes, boneStrokes }) {
                 powerMul: t.powerMul,
                 instabilityDelta: t.instabilityDelta,
                 bridgeCount: bridges.length,
+                lineType,
+                lineLabel: t.detail,
+                links: [{
+                    lineType,
+                    lineLabel: t.detail,
+                    powerMul: t.powerMul,
+                    instabilityDelta: t.instabilityDelta,
+                    bridgeCount: bridges.length,
+                }],
             };
         }
     }
