@@ -1,15 +1,19 @@
 import './style.css'
 import { RecognitionEngine, __INTERNAL__ as RECOGNITION_INTERNAL } from './recognition.js'
-import { analyzeArrangement } from './arrangement.js'
-import { analyzeBoneInteraction } from './bone-interaction.js'
-import { analyzeSentence } from './sentence.js'
-import { analyzeParticles } from './particles.js'
-import { RiftGame } from './rift.js'
+import { assignmentSystem } from './assignmentSystem.js'
+import { analyzeMagic } from './magicPipeline.js'
+import { emit } from './eventBus.js'
+import { gameState } from './gameState.js'
+import { loadGame, saveGame, startAutosave } from './saveLoad.js'
+import { recordDiscovery } from './discoverySystem.js'
+import { initLabNotebook, showToast } from './labNotebook.js'
+import { initAcademicCanon } from './academicCanon.js'
+import { renderAcademicUI } from './academicUI.js'
+import { playCast, playDrawStart, playRiftControl, playStrokeCommit, primeAudio } from './sound.js'
 
 const { bboxOfStrokes, clusterStrokesByProximity } = RECOGNITION_INTERNAL;
 
 const recognizer = new RecognitionEngine();
-const riftGame = new RiftGame();
 const state = {
   mode: 'bone', // 'bone' or 'rune'
   assistMode: 'free', // 'free', 'ruler', 'compass'
@@ -54,7 +58,9 @@ const state = {
   // fire BOTH systems at once. {kind, runes, powerMul, instabilityDelta,
   // detail, particleCount} — see particles.js.
   particles: null,
-  overloaded: false
+  overloaded: false,
+  overloadFxPlayed: false,
+  effects: [],
 };
 
 // Elements
@@ -106,6 +112,9 @@ const btnNextDoc = document.getElementById('btn-next-doc');
 const btnCastMagic = document.getElementById('btn-cast-magic');
 const riftContainer = document.getElementById('rift-container');
 const materialSelect = document.getElementById('material-select');
+const analyzerPanel = document.querySelector('.analyzer-panel');
+const riftPanel = document.querySelector('.rift-panel');
+const archivePanel = document.querySelector('.archive-panel');
 
 // Assist Tools UI
 const btnAssistFree = document.getElementById('btn-assist-free');
@@ -318,11 +327,13 @@ const archives = [
 ];
 
 let currentArchiveIndex = 0;
+let lastRiftCue = null;
 
 // Init
 function init() {
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
+  initCollapsibleUI();
   
   // Events
   canvas.addEventListener('mousedown', startDrawing);
@@ -336,13 +347,31 @@ function init() {
   btnClear.addEventListener('click', clearCanvas);
   btnUndo.addEventListener('click', undoLastStroke);
   window.addEventListener('keydown', (e) => {
-    // Ctrl+Z (and Cmd+Z on macOS) → undo last stroke. Ignore when typing
-    // in form fields so the material <select> keeps its native behavior.
     const target = e.target;
     const inForm = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT');
-    if (!inForm && (e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+    if (inForm) return;
+
+    // Ctrl+Z → undo
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
       undoLastStroke();
+      return;
+    }
+
+    // Single-key shortcuts (no modifiers)
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    switch (e.key) {
+      case '1': setMode('bone'); break;
+      case '2': setMode('rune'); break;
+      case 'q': case 'Q': setAssistMode('free'); break;
+      case 'w': case 'W': setAssistMode('ruler'); break;
+      case 'e': case 'E': setAssistMode('compass'); break;
+      case 'x': case 'X': clearCanvas(); break;
+      case ' ':
+        e.preventDefault();
+        castMagic();
+        break;
     }
   });
   
@@ -359,17 +388,15 @@ function init() {
   btnNextDoc.addEventListener('click', () => changeArchive(1));
   btnCastMagic.addEventListener('click', castMagic);
 
-  btnRiftStart.addEventListener('click', () => {
-    riftGame.start();
-    refreshRiftUI();
-  });
-  btnRiftStop.addEventListener('click', () => {
-    riftGame.stop();
-    refreshRiftUI();
-  });
-
   updateArchiveUI();
   refreshRiftUI();
+
+  // ── Game systems init (M1 + M6) ──────────────────────────────────
+  loadGame();
+  initAcademicCanon();
+  initLabNotebook();
+  renderAcademicUI(gameState, lastAnalysis);
+  startAutosave();
 
   // Start loop
   requestAnimationFrame(renderLoop);
@@ -389,18 +416,55 @@ function updateArchiveUI() {
   archiveSketch.innerHTML = doc.svg;
 }
 
+function initCollapsibleUI() {
+  document.querySelectorAll('[data-panel-toggle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const panel = button.closest('.panel');
+      if (!panel) return;
+      const collapsed = panel.classList.toggle('is-collapsed');
+      button.setAttribute('aria-expanded', String(!collapsed));
+    });
+  });
+
+  document.querySelectorAll('[data-section-toggle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const targetId = button.getAttribute('data-section-toggle');
+      if (!targetId) return;
+      const target = document.getElementById(targetId);
+      const block = button.closest('.analysis-subsection');
+      if (!target || !block) return;
+      const collapsed = block.classList.toggle('is-collapsed');
+      target.hidden = collapsed;
+      button.setAttribute('aria-expanded', String(!collapsed));
+    });
+  });
+}
+
 function castMagic() {
+  primeAudio();
   // Always run the visual cue: the rift pulses and the canvas flashes.
   riftContainer.style.animation = 'none';
   setTimeout(() => {
     riftContainer.style.animation = 'pulse 0.5s ease-out 3';
   }, 10);
+  spawnWave(canvas.width / 2, canvas.height / 2, 'rgba(80, 60, 120, 0.5)', 180, 0.65);
+  pulseUi(riftPanel, 'ui-pulse');
+
+  // ── Discovery recording (M6) ─────────────────────────────────────
+  if (lastAnalysis) {
+    const result = recordDiscovery(lastAnalysis);
+    emit('magic:cast', {
+      analysis: lastAnalysis,
+      week: gameState.progression.currentWeek,
+      day: gameState.progression.currentDay,
+    });
+  }
 
   // When the Rift game is active, judge the cast against the current demand.
   // This intentionally happens BEFORE the canvas wipe so the analyzer state we
   // pass in still reflects what the player drew.
-  if (riftGame.status === 'active') {
-    const judged = riftGame.cast({
+  if (assignmentSystem.status === 'active') {
+    const judged = assignmentSystem.cast({
       ...(lastAnalysis || {
         meaning: state.currentMeaning,
         compoundName: state.currentCompound,
@@ -416,65 +480,101 @@ function castMagic() {
       particles: state.particles,
     });
     if (judged.result === 'success') {
-      ctx.fillStyle = 'rgba(0, 255, 153, 0.45)';
+      ctx.fillStyle = 'rgba(100, 150, 80, 0.5)';
+      playCast('success');
+      spawnWave(canvas.width / 2, canvas.height / 2, 'rgba(100, 150, 80, 0.65)', 260, 0.85);
+      spawnBurst(canvas.width / 2, canvas.height / 2, 'rgba(100, 150, 80, 0.95)', 18, 3.5);
+      pulseUi(riftPanel, 'ui-success');
     } else if (judged.result === 'wrong') {
-      ctx.fillStyle = 'rgba(255, 51, 102, 0.45)';
+      ctx.fillStyle = 'rgba(180, 50, 40, 0.5)';
+      playCast('wrong');
+      spawnWave(canvas.width / 2, canvas.height / 2, 'rgba(180, 50, 40, 0.65)', 220, 0.75);
+      pulseUi(riftPanel, 'ui-shake');
+    } else if (judged.result === 'practicing') {
+      ctx.fillStyle = 'rgba(180, 150, 60, 0.4)';
+      playCast('neutral');
+      spawnWave(canvas.width / 2, canvas.height / 2, 'rgba(180, 150, 60, 0.5)', 200, 0.7);
+    } else if (judged.result === 'allDone' || judged.result === 'miss') {
+      ctx.fillStyle = 'rgba(80, 120, 160, 0.5)';
+      playCast('neutral');
+      spawnWave(canvas.width / 2, canvas.height / 2, 'rgba(80, 120, 160, 0.5)', 180, 0.6);
     } else {
-      ctx.fillStyle = 'rgba(138, 43, 226, 0.45)';
+      ctx.fillStyle = 'rgba(80, 60, 120, 0.5)';
+      playCast('neutral');
     }
     refreshRiftUI();
   } else {
     systemStatus.innerText = `[마법 주입!] ${state.currentMeaning}이(가) 균열로 빨려들어갑니다!`;
     systemStatus.style.color = '#fff';
-    ctx.fillStyle = 'rgba(138, 43, 226, 0.5)';
+    ctx.fillStyle = 'rgba(80, 60, 120, 0.5)';
+    playCast('neutral');
+    spawnBurst(canvas.width / 2, canvas.height / 2, 'rgba(80, 60, 120, 0.9)', 14, 2.4);
   }
 
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   setTimeout(() => {
     clearCanvas();
+    saveGame();
   }, 500);
 }
 
 function refreshRiftUI() {
-  const status = riftGame.status;
-  riftScoreEl.innerText = String(riftGame.score);
-  riftLevelEl.innerText = String(riftGame.getLevel() + 1);
-  const pct = Math.round(riftGame.threat);
-  riftThreatFill.style.width = `${pct}%`;
-  riftThreatVal.innerText = `${pct}%`;
+  riftScoreEl.innerText = String(assignmentSystem.score);
+  riftLevelEl.innerText = String(assignmentSystem.getLevel());
 
-  // Drive the background rift element via a body data-attribute so CSS can
-  // shift the gradient/animation without inline JS-driven keyframes.
-  let band = 'low';
-  if (status === 'gameover' || pct >= 100) band = 'over';
-  else if (pct >= 70) band = 'high';
-  else if (pct >= 35) band = 'mid';
-  document.body.dataset.threat = band;
+  document.body.dataset.threat = 'low';
 
-  if (status === 'active' && riftGame.demand) {
-    riftDemandBlock.style.display = 'grid';
-    riftDemandName.innerText = riftGame.demand.label;
-    riftDemandSketch.innerHTML = riftGame.demand.sketch;
-    riftTimerEl.innerText = `${riftGame.timeRemaining.toFixed(1)}s`;
-    btnRiftStart.style.display = 'none';
-    btnRiftStop.style.display = 'inline-block';
+  const quests = assignmentSystem.dailyQuests || [];
+  const progress = assignmentSystem.getProgress();
+
+  if (quests.length > 0) {
+    riftDemandBlock.style.display = 'block';
+    riftDemandName.innerText = `오늘의 과제 (${progress.done}/${progress.total} 완료)`;
+
+    // 각 퀘스트를 카드로 렌더링
+    const smallSketch = (svg) => svg.replace(/width="80"/g, 'width="40"').replace(/height="80"/g, 'height="40"');
+    riftDemandSketch.innerHTML = quests.map((q, i) => `
+      <div style="
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 10px;
+        border-radius: 4px;
+        background: ${q.done ? 'rgba(100,150,80,0.15)' : 'rgba(44,36,27,0.08)'};
+        border: 1px solid ${q.done ? 'rgba(100,150,80,0.4)' : 'rgba(44,36,27,0.15)'};
+        opacity: ${q.done ? '0.55' : '1'};
+      ">
+        <span style="font-size:0.9rem; min-width:18px; font-weight:600; color:${q.done ? '#6a8' : 'var(--color-secondary)'};">
+          ${q.done ? '✓' : (i + 1) + '.'}
+        </span>
+        <span style="flex-shrink:0; line-height:0;">${smallSketch(q.sketch)}</span>
+        <span style="font-size:0.85rem; color:${q.done ? '#6a8' : 'var(--color-text)'}; ${q.done ? 'text-decoration:line-through;' : ''}">
+          ${q.label}
+          ${q.isStudy ? '<span style="font-size:0.65rem; color:#8b6914; margin-left:4px;">(도감 학습 · 3회 반복)</span>' : ''}
+        </span>
+      </div>
+    `).join('');
+
+    riftTimerEl.innerText = progress.remaining > 0 ? `남은 과제 ${progress.remaining}건` : '모두 완료!';
+    riftTimerEl.style.color = progress.remaining === 0 ? '#6a8' : 'var(--color-secondary)';
   } else {
     riftDemandBlock.style.display = 'none';
-    btnRiftStart.style.display = 'inline-block';
-    btnRiftStop.style.display = 'none';
-    if (status === 'gameover') {
-      btnRiftStart.innerText = '다시 시작';
-    } else {
-      btnRiftStart.innerText = '차원 균열 시작';
-    }
   }
 
-  riftMessageEl.classList.remove('success', 'wrong', 'expired');
-  if (riftGame.lastResult) {
-    riftMessageEl.classList.add(riftGame.lastResult);
+  riftMessageEl.classList.remove('success', 'wrong', 'expired', 'allDone');
+  if (assignmentSystem.lastResult) {
+    riftMessageEl.classList.add(assignmentSystem.lastResult);
   }
-  riftMessageEl.innerText = riftGame.message;
+  riftMessageEl.innerText = assignmentSystem.message;
+  
+  if (assignmentSystem.lastResult !== lastRiftCue) {
+    lastRiftCue = assignmentSystem.lastResult;
+    if (assignmentSystem.lastResult === 'expired') {
+      playCast('wrong');
+      pulseUi(riftPanel, 'ui-shake');
+    }
+  }
 }
 
 function resizeCanvas() {
@@ -505,7 +605,10 @@ function clearCanvas() {
   state.resonance = 0;
   state.heat = 0;
   state.instability = 0;
+  state.currentMeaning = '';
+  state.currentDynamics = '';
   state.currentCompound = null;
+  state.overloadFxPlayed = false;
   // Reset the §9/§10/§11-12/§11.2 analyzer outputs too so the panels collapse
   // to their empty state ('단일 룬' / '단순 뼈대' / '--' / '없음') immediately
   // on Clear instead of carrying over stale values from the previous canvas.
@@ -513,6 +616,9 @@ function clearCanvas() {
   state.boneInteraction = null;
   state.sentence = null;
   state.particles = null;
+  lastAnalysis = null;
+  window.__ARCANE_LAST_ANALYSIS__ = null;
+  renderAcademicUI(gameState, null);
   updateAnalyzerUI();
 }
 
@@ -537,6 +643,9 @@ function undoLastStroke() {
     state.boneInteraction = null;
     state.sentence = null;
     state.particles = null;
+    lastAnalysis = null;
+    window.__ARCANE_LAST_ANALYSIS__ = null;
+    renderAcademicUI(gameState, null);
     systemStatus.innerText = '대기 중...';
     systemStatus.style.color = '#fff';
     btnCastMagic.style.display = 'none';
@@ -548,11 +657,15 @@ function undoLastStroke() {
 
 // Drawing Logic
 let drawStartPt = null;
+let lastAnalyzeTime = 0;
 
 function startDrawing(e) {
+  primeAudio();
+  playDrawStart(state.mode);
   state.isDrawing = true;
   const { offsetX, offsetY } = e;
   drawStartPt = { x: offsetX, y: offsetY, t: Date.now() };
+  spawnWave(offsetX, offsetY, state.mode === 'bone' ? 'rgba(120, 100, 80, 0.4)' : 'rgba(40, 30, 20, 0.5)', 36, 0.25);
   state.currentStroke = [{
     x: offsetX,
     y: offsetY,
@@ -610,7 +723,10 @@ function draw(e) {
   }
   
   // Simple analysis update on draw
-  analyzeCurrentState();
+  if (now - lastAnalyzeTime > 150) {
+    analyzeCurrentState();
+    lastAnalyzeTime = now;
+  }
 }
 
 function stopDrawing() {
@@ -619,30 +735,36 @@ function stopDrawing() {
     if (state.assistMode !== 'free') {
        state.currentStroke.forEach(pt => pt.t = Date.now() - 5000); // Hack to simulate slow, careful drawing
     }
+    const endPt = state.currentStroke[state.currentStroke.length - 1];
+    playStrokeCommit(state.mode, state.assistMode);
+    spawnBurst(endPt.x, endPt.y, state.mode === 'bone' ? 'rgba(120, 100, 80, 0.6)' : 'rgba(40, 30, 20, 0.7)', state.mode === 'bone' ? 8 : 12, state.mode === 'bone' ? 1.8 : 2.6);
     state.strokes.push([...state.currentStroke]);
     state.currentStroke = [];
   }
   state.isDrawing = false;
   drawStartPt = null;
   analyzeCurrentState();
+  lastAnalyzeTime = Date.now();
 }
 
 // Rendering Loop
 function renderLoop() {
-  // Tick the Rift game once per frame so threat drift / timer countdown stay
-  // smooth. refreshRiftUI is cheap (no recognition work) and keeps the
-  // top-center panel + body data-threat in sync with current threat.
-  if (riftGame.status === 'active') {
-    riftGame.tick(performance.now());
-    refreshRiftUI();
-  }
+  // Tick the UI for Professor's Assignments. (State is updated by schedule.js)
+  refreshRiftUI();
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   
   if (state.overloaded) {
-     ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+     if (!state.overloadFxPlayed) {
+       state.overloadFxPlayed = true;
+       playCast('overload');
+       pulseUi(analyzerPanel, 'ui-shake');
+       spawnWave(canvas.width / 2, canvas.height / 2, 'rgba(139, 0, 0, 0.8)', 320, 0.9);
+       spawnBurst(canvas.width / 2, canvas.height / 2, 'rgba(139, 0, 0, 0.95)', 24, 4.5);
+     }
+     ctx.fillStyle = 'rgba(139, 0, 0, 0.3)';
      ctx.fillRect(0, 0, canvas.width, canvas.height);
-     ctx.fillStyle = '#ff3366';
+     ctx.fillStyle = '#8b0000';
      ctx.font = '40px sans-serif';
      ctx.textAlign = 'center';
      ctx.fillText('OVERLOAD', canvas.width/2, canvas.height/2);
@@ -653,10 +775,10 @@ function renderLoop() {
   const now = Date.now() / 1000;
 
   if (state.material === 'water') {
-     ctx.fillStyle = 'rgba(0, 50, 100, 0.1)';
+     ctx.fillStyle = 'rgba(40, 60, 90, 0.1)';
      ctx.fillRect(0, 0, canvas.width, canvas.height);
   } else if (state.material === 'obsidian') {
-     ctx.fillStyle = 'rgba(20, 10, 30, 0.3)';
+     ctx.fillStyle = 'rgba(25, 20, 15, 0.15)';
      ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
 
@@ -686,146 +808,26 @@ function renderLoop() {
   
     const mode = stroke[0].mode;
     if (mode === 'bone') {
-      ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
-      ctx.lineWidth = 2;
-      ctx.shadowColor = 'rgba(0, 255, 255, 0.5)';
-      ctx.shadowBlur = 10;
+      ctx.strokeStyle = 'rgba(120, 100, 80, 0.7)';
+      ctx.lineWidth = 1.5;
+      ctx.shadowBlur = 0;
     } else {
-      ctx.strokeStyle = 'rgba(255, 51, 102, 0.9)';
-      ctx.lineWidth = 4;
-      ctx.shadowColor = 'rgba(255, 51, 102, 0.8)';
-      ctx.shadowBlur = 15;
+      ctx.strokeStyle = 'rgba(30, 20, 10, 0.9)';
+      ctx.lineWidth = 3.5;
+      ctx.shadowBlur = 0;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
     }
     ctx.stroke();
     ctx.shadowBlur = 0;
   });
+  renderEffects();
   renderGraph();
   
   requestAnimationFrame(renderLoop);
 }
 
-// Particle main-unit derivation (RUNE_DICTIONARY §11.2 integration).
-//
-// The upstream pipelines (recognition.js + arrangement.js + sentence.js)
-// classify any stroke that recognizes as a rune into its own main unit and
-// merge by spatial proximity, which causes two failure modes for particles:
-//
-//   (A) A clean small bar drawn *next to* a larger rune is recognized as
-//       its own main rune (e.g. 이사) and gets claimed → never fires as
-//       a particle.
-//   (B) A small bar drawn *through* a larger rune physically overlaps
-//       with it, so proximity clustering merges them into one cluster
-//       and arrangement detects a §2 compound. Particles never fire on
-//       the inner stroke either.
-//
-// This helper handles both by:
-//
-//   1. Run the standard proximity clustering as a coarse pass.
-//   2. Within each cluster, decompose by *structural endpoint connectivity*
-//      — strokes that share an endpoint within a tolerance are part of the
-//      same structural group (e.g. △'s three edges); strokes that don't are
-//      separate groups (e.g. a ㅡ drawn through △ doesn't share endpoints
-//      with the triangle, so it splits out).
-//   3. Compare group sizes: only groups whose bbox area is ≥30% of the
-//      largest group's area count as "main"; smaller groups are particle
-//      candidates regardless of whether they individually identify as runes.
-//   4. When all groups are comparable size (genuine multi-rune sentence)
-//      defer to sentence.mainUnits / arrangement.units so connector
-//      classification is preserved.
-function derivePerticleMainUnits({ runeStrokes, arrangement, sentence }) {
-  if (!runeStrokes || runeStrokes.length === 0) return [];
-  const clusters = clusterStrokesByProximity(runeStrokes);
-  if (!clusters || clusters.length === 0) return [];
-
-  // Decompose each proximity cluster by structural endpoint connectivity
-  // so a stroke that physically overlaps a main rune but doesn't share any
-  // endpoint with it (e.g. ㅡ drawn through ○) becomes its own group.
-  const groups = [];
-  for (const cluster of clusters) {
-    for (const g of decomposeByEndpointConnectivity(cluster)) groups.push(g);
-  }
-
-  // Compute bbox + size for each group. Use max(w,1)*max(h,1) instead of
-  // raw bbox area so 1D runes (이사 has bbox.w ≈ 0) aren't treated as zero.
-  const sized = groups.map(group => {
-    const bb = bboxOfStrokes(group);
-    const area = Math.max(bb.w, 1) * Math.max(bb.h, 1);
-    return { group, bb, area };
-  });
-  sized.sort((a, b) => b.area - a.area);
-
-  if (sized.length === 1) {
-    const { group, bb } = sized[0];
-    const name = recognizer.identifyRune(group) || '복합 룬';
-    return [{ name, bbox: bb, center: { x: bb.cx, y: bb.cy }, strokes: group }];
-  }
-
-  const dominantArea = sized[0].area;
-  const MAIN_AREA_RATIO = 0.30;
-
-  const mainBuckets = sized.filter(s => s.area >= dominantArea * MAIN_AREA_RATIO);
-
-  // If the upstream sentence already produced mainUnits and the dominance
-  // analysis says all groups are comparable size, prefer sentence.mainUnits
-  // (it has connector classification).
-  if (mainBuckets.length === sized.length) {
-    if (sentence && Array.isArray(sentence.mainUnits) && sentence.mainUnits.length > 0) {
-      return sentence.mainUnits;
-    }
-    if (arrangement && Array.isArray(arrangement.units) && arrangement.units.length > 0) {
-      return arrangement.units;
-    }
-  }
-
-  // Otherwise: only the dominant groups are main. Smaller ones are
-  // particle-sized and therefore NOT claimed → they become candidates.
-  return mainBuckets.map(({ group, bb }) => {
-    const name = recognizer.identifyRune(group) || '복합 룬';
-    return { name, bbox: bb, center: { x: bb.cx, y: bb.cy }, strokes: group };
-  });
-}
-
-// Decompose a list of strokes into structurally-connected groups using
-// shared endpoint proximity (within `endpointTol` pixels). Strokes that
-// share at least one endpoint with another stroke transitively form one
-// group. Used inside derivePerticleMainUnits to separate overlapping but
-// structurally-independent strokes (e.g. ㅡ drawn through ○).
-function decomposeByEndpointConnectivity(strokes, endpointTol = 18) {
-  if (!strokes || strokes.length <= 1) return strokes && strokes.length > 0 ? [strokes] : [];
-  const n = strokes.length;
-  const parent = Array.from({ length: n }, (_, i) => i);
-  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
-  const unite = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
-  const tol2 = endpointTol * endpointTol;
-  const close = (p, q) => {
-    if (!p || !q) return false;
-    const dx = p.x - q.x, dy = p.y - q.y;
-    return dx * dx + dy * dy <= tol2;
-  };
-  for (let i = 0; i < n; i++) {
-    const sa = strokes[i];
-    if (!sa || sa.length === 0) continue;
-    const aStart = sa[0], aEnd = sa[sa.length - 1];
-    for (let j = i + 1; j < n; j++) {
-      const sb = strokes[j];
-      if (!sb || sb.length === 0) continue;
-      const bStart = sb[0], bEnd = sb[sb.length - 1];
-      if (close(aStart, bStart) || close(aStart, bEnd) ||
-          close(aEnd, bStart)   || close(aEnd, bEnd)) {
-        unite(i, j);
-      }
-    }
-  }
-  const buckets = new Map();
-  for (let i = 0; i < n; i++) {
-    const r = find(i);
-    if (!buckets.has(r)) buckets.set(r, []);
-    buckets.get(r).push(strokes[i]);
-  }
-  return Array.from(buckets.values());
-}
+// derivePerticleMainUnits and decomposeByEndpointConnectivity moved to magicPipeline.js
 
 // Analysis Logic
 function analyzeCurrentState() {
@@ -837,157 +839,123 @@ function analyzeCurrentState() {
   const runeStrokes = allStrokes.filter(s => s.length > 0 && s[0].mode === 'rune');
   const boneStrokes = allStrokes.filter(s => s.length > 0 && s[0].mode === 'bone');
 
-  let boneLines = boneStrokes.length;
-  let runeLines = runeStrokes.length;
-
-  const analysis = recognizer.analyzeRune(runeStrokes, boneStrokes);
-
-  // Arrangement (RUNE_DICTIONARY §9): when the player draws multiple runes,
-  // their *spatial layout* (linear / circular / triangular / radial / overlap
-  // / symmetric) modifies overall power and instability on top of the
-  // single-rune analysis above. Compound matches short-circuit to the
-  // 'overlapping' kind (×2.0) — see arrangement.js.
-  const arrangement = analyzeArrangement({
+  // ── magicPipeline 통합 호출 (M2) ─────────────────────────────────
+  const result = analyzeMagic({
     runeStrokes,
     boneStrokes,
+    allStrokes,
+    material: state.material,
     recognizer,
-    compoundName: analysis.compoundName,
   });
-  state.arrangement = arrangement;
 
-  // Bone × Rune interaction (RUNE_DICTIONARY §10). Independent of arrangement;
-  // both stack on the final cast power. boneFirst is true when the first bone
-  // stroke in state.strokes precedes the first rune stroke (so we know whether
-  // the player drew the structural bone first → 받치기) — checked against the
-  // ordered stroke list, not the filtered arrays.
-  const firstBoneIdx = allStrokes.findIndex(s => s.length > 0 && s[0].mode === 'bone');
-  const firstRuneIdx = allStrokes.findIndex(s => s.length > 0 && s[0].mode === 'rune');
-  const boneFirst = firstBoneIdx >= 0 && firstRuneIdx >= 0 && firstBoneIdx < firstRuneIdx;
-  const boneInteraction = analyzeBoneInteraction({
-    runeStrokes,
-    boneStrokes,
-    boneFirst,
-  });
-  state.boneInteraction = boneInteraction;
+  // Pipeline 결과를 state에 반영 (기존 UI 호환성 유지)
+  const obs = result.observables;
+  state.resonance = obs.resonance;
+  state.heat = obs.heat;
+  state.pressure = obs.pressure;
+  state.instability = obs.instability;
+  state.overloaded = obs.overloaded;
 
-  // Sentence-level grammar (RUNE_DICTIONARY §§11-12). Reuses the arrangement's
-  // identified rune units to classify connector runes (대지/이사/게보/+/</+/◇),
-  // sentence grade by main-rune count, and reading direction. Stacks its own
-  // powerMul × instabilityDelta on top of arrangement and bone interaction.
-  const sentence = analyzeSentence({
-    runeStrokes,
-    recognizer,
-    arrangement,
-    boneInteraction,
-  });
-  state.sentence = sentence;
+  state.currentMeaning = result.legacy.meaning;
+  state.currentDynamics = result.legacy.dynamics;
+  state.currentCompound = result.legacy.compoundName || null;
 
-  // Particle system (RUNE_DICTIONARY §11.2). Stacks with arrangement /
-  // bone / sentence multiplicatively. By design also stacks with §2
-  // radical compounds (no exclusion logic) so the same drawing yields
-  // different cast behavior depending on which layer the player
-  // optimizes around.
-  //
-  // Main-unit derivation (intentionally NOT just `arrangement.units` /
-  // `sentence.mainUnits`): the upstream pipelines aggressively claim any
-  // recognizable stroke as a separate main rune (e.g. a clean vertical
-  // bar near a circle becomes 이사, blocking it from firing as 강화
-  // particle). Instead we re-cluster the rune strokes and treat clusters
-  // that are significantly smaller than the largest one as
-  // particle candidates regardless of whether they individually
-  // identify as runes. This is what unlocks 강화/극대/부정 etc. on real
-  // hand drawings.
-  const particleMainUnits = derivePerticleMainUnits({
-    runeStrokes,
-    arrangement,
-    sentence,
-  });
-  const particles = analyzeParticles({
-    runeStrokes,
-    mainUnits: particleMainUnits,
-  });
-  state.particles = particles;
+  // Raw 분석 결과 — UI 패널에서 직접 참조
+  state.arrangement = result._raw.arrangement;
+  state.boneInteraction = result._raw.boneInteraction;
+  state.sentence = result._raw.sentence;
+  state.particles = result._raw.particles;
 
-  // Thermodynamics: Volume (V) = Area of Bones
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  boneStrokes.forEach(stroke => {
-    stroke.forEach(pt => {
-      if(pt.x < minX) minX = pt.x;
-      if(pt.y < minY) minY = pt.y;
-      if(pt.x > maxX) maxX = pt.x;
-      if(pt.y > maxY) maxY = pt.y;
-    });
-  });
-  
-  let volume = 1;
-  if (minX !== Infinity) {
-    volume = Math.max(((maxX - minX) * (maxY - minY)) / 10000, 1);
+  lastAnalysis = result;
+  window.__ARCANE_LAST_ANALYSIS__ = result;
+  renderAcademicUI(gameState, result);
+  if (result.sentence?.pattern && result.sentence.pattern !== 'unknown') {
+    pulseUi(analyzerPanel, 'ui-pulse');
+  }
+  if (result.grammar?.operators?.length) {
+    pulseUi(archivePanel, 'ui-pulse-soft');
   }
 
-  // Thermodynamics: Density (n)
-  let density = 0;
-  runeStrokes.forEach(stroke => {
-    density += stroke.length;
-  });
-
-  // Calculate Heat based on drawing speed (Resistance Heat = I^2R)
-  let newHeat = 0;
-  allStrokes.forEach(stroke => {
-    if (stroke.length > 5) {
-       const timeTaken = stroke[stroke.length-1].t - stroke[0].t;
-       if (timeTaken > 0) {
-         const speed = stroke.length / timeTaken; // Points per ms
-         // Fast speed = high resistance = high heat
-         newHeat += speed * 500;
-       }
-    }
-  });
-
-  state.resonance = Math.min(boneLines * 12.5, 100);
-  state.heat = Math.floor(newHeat + (analysis.radicals.length * 50));
-  
-  // Thermodynamics: Pressure (P) = (n * T) / V
-  state.pressure = Math.floor((density * Math.max(state.heat, 1)) / (volume * 10));
-
-  let baseInstability = (state.pressure * 0.1) + (state.heat * 0.05) - (state.resonance * 0.5);
-  
-  // Material Modifiers
-  let maxHeat = 150;
-  if (state.material === 'obsidian') {
-    maxHeat = 9999;
-    baseInstability -= 20; // Obsidian is very stable
-  } else if (state.material === 'water') {
-    maxHeat = 300;
-    baseInstability += 10;
-  }
-  
-  // Arrangement instability delta stacks on top of single-rune + compound
-  // bonuses. Triangular 균형 / 대칭 배열 lower it; radial / 원형 / 삼중 강화
-  // raise it. Bone interaction (§10) stacks too — 결계 (square enclosing)
-  // lowers, 십자 걸치기 / 공명 raise. Sentence grade (§12) adds another delta
-  // — 절 +15, 문장 +30, 주문 +50 (all reflect higher-grade spells being more
-  // unstable). All clamped to [0, 100].
-  const arrangementDelta = (state.arrangement && state.arrangement.instabilityDelta) || 0;
-  const boneInteractionDelta = (state.boneInteraction && state.boneInteraction.instabilityDelta) || 0;
-  const sentenceDelta = (state.sentence && state.sentence.instabilityDelta) || 0;
-  const particleDelta = (state.particles && state.particles.instabilityDelta) || 0;
-  state.instability = Math.max(Math.min(
-    baseInstability + analysis.instabilityModifier
-      + arrangementDelta + boneInteractionDelta + sentenceDelta + particleDelta,
-    100), 0);
-
-  // Overload reflects whether the current stroke set exceeds limits. Recompute
-  // every analysis so removing a stroke (Undo) or pure clear can take the canvas
-  // out of overload without an explicit reset, and so the OVERLOAD overlay can't
-  // be left stuck on top of a perfectly safe heat/instability reading.
-  state.overloaded = state.heat > maxHeat || state.instability >= 100;
-
-  state.currentMeaning = analysis.meaning;
-  state.currentDynamics = analysis.dynamics;
-  state.currentCompound = analysis.compoundName || null;
-  lastAnalysis = analysis;
+  // 이벤트 발행 (M1)
+  emit('magic:analyzed', result);
 
   updateAnalyzerUI();
+}
+
+function spawnWave(x, y, color, maxRadius = 120, life = 0.5) {
+  state.effects.push({
+    kind: 'wave',
+    x,
+    y,
+    color,
+    bornAt: performance.now(),
+    lifeMs: life * 1000,
+    maxRadius,
+  });
+}
+
+function spawnBurst(x, y, color, count = 10, speed = 2.2) {
+  state.effects.push({
+    kind: 'burst',
+    x,
+    y,
+    color,
+    bornAt: performance.now(),
+    lifeMs: 520,
+    particles: Array.from({ length: count }, (_, index) => {
+      const angle = (Math.PI * 2 * index) / count + Math.random() * 0.35;
+      const velocity = speed * (0.8 + Math.random() * 0.8);
+      return {
+        vx: Math.cos(angle) * velocity,
+        vy: Math.sin(angle) * velocity,
+        size: 1.5 + Math.random() * 2.5,
+      };
+    }),
+  });
+}
+
+function renderEffects() {
+  const now = performance.now();
+  state.effects = state.effects.filter((effect) => {
+    const age = now - effect.bornAt;
+    const progress = age / effect.lifeMs;
+    if (progress >= 1) return false;
+
+    if (effect.kind === 'wave') {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(effect.x, effect.y, effect.maxRadius * progress, 0, Math.PI * 2);
+      ctx.strokeStyle = effect.color.replace(/[\d.]+\)$/u, `${Math.max(0.04, 0.7 - progress * 0.7)})`);
+      ctx.lineWidth = 1 + (1 - progress) * 4;
+      ctx.stroke();
+      ctx.restore();
+      return true;
+    }
+
+    if (effect.kind === 'burst') {
+      ctx.save();
+      effect.particles.forEach((particle) => {
+        const px = effect.x + particle.vx * age * 0.06;
+        const py = effect.y + particle.vy * age * 0.06;
+        ctx.fillStyle = effect.color.replace(/[\d.]+\)$/u, `${Math.max(0.05, 0.9 - progress * 0.9)})`);
+        ctx.beginPath();
+        ctx.arc(px, py, particle.size * (1 - progress * 0.55), 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.restore();
+      return true;
+    }
+
+    return false;
+  });
+}
+
+function pulseUi(element, className) {
+  if (!element) return;
+  element.classList.remove(className);
+  void element.offsetWidth;
+  element.classList.add(className);
+  setTimeout(() => element.classList.remove(className), 500);
 }
 
 function updateAnalyzerUI() {
@@ -1050,7 +1018,7 @@ function updateAnalyzerUI() {
       valParticle.innerText = `${p.particleCount}개 ×${mul}`;
       particleDetail.innerText = p.detail || '';
       particleDetail.style.display = p.detail ? 'block' : 'none';
-      if (p.powerMul === 0) valParticle.style.color = '#ff3366';
+      if (p.powerMul === 0) valParticle.style.color = '#8b0000';
       else if (p.powerMul >= 1.5) valParticle.style.color = '#ffaa00';
       else if (p.instabilityDelta < 0) valParticle.style.color = '#5fdfff';
       else valParticle.style.color = '#cccccc';
@@ -1097,13 +1065,14 @@ function updateAnalyzerUI() {
   // During a Rift run the player must be able to cast at the demand even if
   // they haven't laid down enough bones for full resonance — the rift game has
   // its own pressure (timer + threat) and shouldn't double-gate on resonance.
-  const riftActive = riftGame.status === 'active';
+  const riftActive = assignmentSystem.status === 'active';
   const hasRune = runeStrokesCount() > 0;
+  const hasLiveStroke = state.strokes.length > 0 || state.currentStroke.length > 0;
   const resonant = state.resonance > 30 && hasRune;
   const canCast = resonant || (riftActive && hasRune);
   if (state.instability > 80) {
     systemStatus.innerText = `[경고] 붕괴 임박! (${state.currentMeaning})`;
-    systemStatus.style.color = '#ff3366';
+    systemStatus.style.color = '#8b0000';
     btnCastMagic.style.display = 'none';
   } else if (state.currentCompound) {
     const prefix = canCast ? '결합 발현' : '결합 감지';
@@ -1114,7 +1083,7 @@ function updateAnalyzerUI() {
     systemStatus.innerText = `발현 중: ${state.currentMeaning} - ${state.currentDynamics}`;
     systemStatus.style.color = '#8a2be2';
     btnCastMagic.style.display = 'block';
-  } else if (state.strokes.length > 0) {
+  } else if (hasLiveStroke) {
     systemStatus.innerText = `분석 중: ${state.currentMeaning}`;
     systemStatus.style.color = '#00ffff';
     btnCastMagic.style.display = 'none';
@@ -1146,7 +1115,7 @@ function renderGraph() {
     else graphCtx.lineTo(x, y);
   }
   
-  graphCtx.strokeStyle = state.instability > 80 ? '#ff3366' : '#00ffff';
+  graphCtx.strokeStyle = state.instability > 80 ? '#8b0000' : '#4b3e2a';
   graphCtx.lineWidth = 2;
   graphCtx.stroke();
 }

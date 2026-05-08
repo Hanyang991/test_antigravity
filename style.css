@@ -1,15 +1,17 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+
 :root {
-  --color-bg: #050508;
-  --color-primary: #8a2be2; /* Neon Purple */
-  --color-secondary: #00ffff; /* Neon Cyan */
-  --color-danger: #ff3366; /* Neon Pink/Red */
-  --color-text: #e0e0ff;
-  --color-text-muted: #8888aa;
-  --color-panel-bg: rgba(15, 15, 25, 0.6);
-  --color-panel-border: rgba(138, 43, 226, 0.3);
+  --color-bg: #e1d5c1; /* Parchment base */
+  --color-primary: #8b0000; /* Dark Red / Blood Ink */
+  --color-secondary: #4b3e2a; /* Dark Brown / Ink */
+  --color-danger: #8b0000; /* Dark Red */
+  --color-text: #2c241b; /* Dark Ink */
+  --color-text-muted: #6b5e4a; /* Faded Ink */
+  --color-panel-bg: rgba(235, 226, 208, 0.9); /* Light Parchment Panel */
+  --color-panel-border: rgba(107, 94, 74, 0.4);
   
-  --font-main: 'Outfit', sans-serif;
-  --font-data: 'Share Tech Mono', monospace;
+  --font-main: 'Cormorant Garamond', serif;
+  --font-data: 'Cormorant Garamond', serif;
 }
 
 * {
@@ -20,6 +22,7 @@
 
 body {
   background-color: var(--color-bg);
+  background-image: url('data:image/svg+xml;utf8,<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg"><filter id="noiseFilter"><feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="3" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(%23noiseFilter)" opacity="0.08"/></svg>');
   color: var(--color-text);
   font-family: var(--font-main);
   overflow: hidden; /* Prevent scrolling, it's a full-screen app */
@@ -50,14 +53,14 @@ body {
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(0,0,0,1) 0%, rgba(20,0,40,0.5) 40%, rgba(0,0,0,0) 70%);
-  box-shadow: 0 0 50px rgba(138, 43, 226, 0.2), inset 0 0 30px rgba(0, 255, 255, 0.1);
+  background: radial-gradient(circle, rgba(139,69,19,0.2) 0%, rgba(139,69,19,0.05) 40%, rgba(0,0,0,0) 70%);
+  box-shadow: 0 0 50px rgba(139,69,19, 0.1), inset 0 0 30px rgba(139,69,19, 0.05);
   animation: pulse 4s infinite alternate;
 }
 
 @keyframes pulse {
-  0% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 40px rgba(138, 43, 226, 0.1), inset 0 0 20px rgba(0, 255, 255, 0.1); }
-  100% { transform: scale(1.05); opacity: 1; box-shadow: 0 0 80px rgba(138, 43, 226, 0.4), inset 0 0 50px rgba(0, 255, 255, 0.2); }
+  0% { transform: scale(0.95); opacity: 0.8; box-shadow: 0 0 40px rgba(139,69,19, 0.05), inset 0 0 20px rgba(139,69,19, 0.05); }
+  100% { transform: scale(1.05); opacity: 1; box-shadow: 0 0 80px rgba(139,69,19, 0.2), inset 0 0 50px rgba(139,69,19, 0.1); }
 }
 
 /* Main Canvas */
@@ -81,27 +84,29 @@ body {
   z-index: 10;
   pointer-events: none; /* Let clicks pass through to canvas */
   padding: 2rem;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
 }
 
 .glass-panel {
   background: var(--color-panel-bg);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   border: 1px solid var(--color-panel-border);
-  border-radius: 12px;
+  border-radius: 4px;
   padding: 1.5rem;
   pointer-events: auto; /* Enable clicks on panels */
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  box-shadow: 2px 4px 15px rgba(44, 36, 27, 0.15), inset 0 0 40px rgba(139, 69, 19, 0.05);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
 }
 
 .panel-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid rgba(107, 94, 74, 0.3);
   padding-bottom: 0.5rem;
   margin-bottom: 1rem;
 }
@@ -114,18 +119,61 @@ body {
   color: var(--color-secondary);
 }
 
-/* Top Center: Abyssal Rift Game */
+.panel-header-compact {
+  margin-bottom: 0.85rem;
+}
+
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.panel-toggle,
+.section-toggle {
+  border: 1px solid rgba(107, 94, 74, 0.5);
+  background: rgba(107, 94, 74, 0.1);
+  color: var(--color-text);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+}
+
+.panel-toggle {
+  width: 32px;
+  height: 32px;
+  font-size: 1rem;
+}
+
+.section-toggle {
+  width: 24px;
+  height: 24px;
+  font-size: 0.8rem;
+}
+
+.panel-toggle:hover,
+.section-toggle:hover {
+  background: rgba(107, 94, 74, 0.2);
+  border-color: rgba(139, 0, 0, 0.4);
+}
+
+.panel.is-collapsed .panel-content {
+  display: none;
+}
+
+.panel.is-collapsed .panel-toggle,
+.analysis-subsection.is-collapsed .section-toggle {
+  transform: rotate(-90deg);
+}
+
+/* Top Center: Abyssal Rift Game (Now Professor Assignment) */
 .rift-panel {
   position: absolute;
   top: 2rem;
   left: 50%;
   transform: translateX(-50%);
-  width: 360px;
+  width: 480px;
   max-width: calc(100vw - 4rem);
-}
-
-.rift-panel.is-active .rift {
-  /* let the underlying rift element react via body/data attributes */
 }
 
 .rift-score-badge {
@@ -148,9 +196,9 @@ body {
 .threat-bar {
   flex: 1;
   height: 12px;
-  background: rgba(0,0,0,0.6);
-  border: 1px solid rgba(138, 43, 226, 0.4);
-  border-radius: 6px;
+  background: rgba(255,255,255,0.4);
+  border: 1px solid rgba(107, 94, 74, 0.5);
+  border-radius: 2px;
   overflow: hidden;
   position: relative;
 }
@@ -158,9 +206,9 @@ body {
 .threat-fill {
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, #00ffff, #8a2be2 60%, #ff3366);
+  background: linear-gradient(90deg, #5c4e3a, #8b0000);
   transition: width 0.2s linear;
-  box-shadow: 0 0 12px rgba(255, 51, 102, 0.5);
+  box-shadow: none;
 }
 
 .threat-val {
@@ -171,50 +219,43 @@ body {
 }
 
 .demand-block {
-  background: rgba(0,0,0,0.4);
-  border: 1px dashed rgba(255,170,0,0.5);
-  border-radius: 8px;
+  background: #f4ecdb;
+  border: 1px solid #4b3e2a;
+  border-radius: 4px;
   padding: 0.8rem;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-rows: auto auto auto;
-  grid-template-areas:
-    "label sketch"
-    "name  sketch"
-    "timer sketch";
-  gap: 0.3rem 0.8rem;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
   margin-bottom: 0.8rem;
+  box-shadow: inset 0 0 10px rgba(139,69,19,0.1);
 }
 
 .demand-label {
-  grid-area: label;
   font-family: var(--font-data);
   font-size: 0.75rem;
-  color: #ffaa00;
+  color: #8b0000;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-}
-
-.demand-name {
-  grid-area: name;
-  font-family: var(--font-data);
-  font-size: 1.1rem;
-  color: #ffd97a;
   font-weight: bold;
 }
 
+.demand-name {
+  font-family: var(--font-data);
+  font-size: 1rem;
+  color: #2c241b;
+  font-weight: bold;
+  margin-bottom: 0.3rem;
+}
+
 .demand-sketch {
-  grid-area: sketch;
-  width: 80px;
-  height: 80px;
   display: flex;
-  justify-content: center;
-  align-items: center;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 280px;
+  overflow-y: auto;
 }
 
 .timer-row {
-  grid-area: timer;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -235,16 +276,17 @@ body {
 
 .rift-message {
   font-family: var(--font-data);
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   color: var(--color-text);
   text-align: center;
   margin-bottom: 0.6rem;
   min-height: 1.1em;
+  font-weight: bold;
 }
 
-.rift-message.success { color: #00ff99; }
-.rift-message.wrong { color: #ff3366; }
-.rift-message.expired { color: #ffaa00; }
+.rift-message.success { color: #2e8b57; }
+.rift-message.wrong { color: #8b0000; }
+.rift-message.expired { color: #8b0000; }
 
 .rift-controls {
   display: flex;
@@ -252,22 +294,17 @@ body {
   justify-content: center;
 }
 
-/* Drive the background rift element from threat level. main.js writes
- * data-threat="low|mid|high|over" on <body>; we accelerate the pulse and
- * shift colors accordingly so the player feels the danger build. */
+/* Background styling for Threat Level */
 body[data-threat="mid"] .rift {
   animation-duration: 2.4s;
-  background: radial-gradient(circle, rgba(0,0,0,1) 0%, rgba(60,0,40,0.6) 40%, rgba(0,0,0,0) 70%);
 }
 body[data-threat="high"] .rift {
   animation-duration: 1.2s;
-  background: radial-gradient(circle, rgba(0,0,0,1) 0%, rgba(120,0,30,0.7) 40%, rgba(0,0,0,0) 75%);
-  box-shadow: 0 0 80px rgba(255, 51, 102, 0.5), inset 0 0 50px rgba(255, 51, 102, 0.3);
+  box-shadow: 0 0 80px rgba(139, 0, 0, 0.2), inset 0 0 50px rgba(139, 0, 0, 0.1);
 }
 body[data-threat="over"] .rift {
   animation-duration: 0.6s;
-  background: radial-gradient(circle, rgba(0,0,0,1) 0%, rgba(255,30,30,0.85) 50%, rgba(255,0,0,0) 80%);
-  box-shadow: 0 0 120px rgba(255, 51, 102, 0.8), inset 0 0 80px rgba(255, 51, 102, 0.5);
+  box-shadow: 0 0 120px rgba(139, 0, 0, 0.4), inset 0 0 80px rgba(139, 0, 0, 0.2);
 }
 
 /* Top Left: Archive */
@@ -276,6 +313,11 @@ body[data-threat="over"] .rift {
   top: 2rem;
   left: 2rem;
   width: 320px;
+  max-height: calc(100vh - 14rem);
+}
+
+.archive-panel .panel-content {
+  overflow: auto;
 }
 
 .archive-nav {
@@ -293,34 +335,35 @@ body[data-threat="over"] .rift {
   padding: 2px 6px;
 }
 .archive-nav button:hover {
-  background: rgba(255,255,255,0.1);
+  background: rgba(107, 94, 74, 0.1);
 }
 
 .status-badge {
   font-family: var(--font-data);
   font-size: 0.8rem;
-  background: rgba(138, 43, 226, 0.2);
+  background: rgba(107, 94, 74, 0.15);
   padding: 2px 8px;
   border-radius: 4px;
   color: var(--color-primary);
+  font-weight: bold;
 }
 
 .lore-text {
   font-style: italic;
   color: var(--color-text-muted);
-  font-size: 0.95rem;
-  line-height: 1.5;
+  font-size: 1.05rem;
+  line-height: 1.6;
   margin-bottom: 1rem;
 }
 
 .sketch-box {
-  background: rgba(0,0,0,0.3);
-  border-radius: 8px;
+  background: rgba(255,255,255,0.4);
+  border-radius: 4px;
   padding: 1rem;
   display: flex;
   justify-content: center;
   align-items: center;
-  border: 1px dashed rgba(255,255,255,0.2);
+  border: 1px dashed rgba(107, 94, 74, 0.4);
 }
 
 /* Right Side: Analyzer */
@@ -328,7 +371,13 @@ body[data-threat="over"] .rift {
   position: absolute;
   top: 2rem;
   right: 2rem;
-  width: 300px;
+  width: 320px;
+  max-height: calc(100vh - 14rem);
+}
+
+.analyzer-panel .panel-content {
+  overflow: auto;
+  padding-right: 0.2rem;
 }
 
 .data-row {
@@ -340,40 +389,97 @@ body[data-threat="over"] .rift {
 
 .data-row .label {
   color: var(--color-text-muted);
-  font-size: 0.9rem;
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .data-row .value {
   color: var(--color-secondary);
   font-weight: bold;
+  font-size: 1.05rem;
 }
 
 .arrangement-detail {
   margin: -0.25rem 0 0.5rem 0;
   padding-left: 0.5rem;
-  border-left: 2px solid rgba(255, 170, 0, 0.4);
+  border-left: 2px solid rgba(139, 0, 0, 0.4);
   font-family: var(--font-data);
-  font-size: 0.8rem;
-  color: #d2c39a;
+  font-size: 0.85rem;
+  color: #8b0000;
   letter-spacing: 0.02em;
+}
+
+.analysis-subsection {
+  margin-top: 0.65rem;
+  padding: 0.7rem 0.75rem;
+  background: rgba(255, 255, 255, 0.3);
+  border: 1px dashed rgba(107, 94, 74, 0.3);
+  border-radius: 4px;
+}
+
+.analysis-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.45rem;
+  color: var(--color-secondary);
+  font-family: var(--font-data);
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.analysis-subsection.is-collapsed .analysis-block-body {
+  display: none;
+}
+
+.analysis-subsection.is-collapsed .analysis-block-header {
+  margin-bottom: 0;
+}
+
+.analysis-block-body {
+  display: grid;
+  gap: 0.3rem;
+  color: var(--color-text);
+  font-family: var(--font-data);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.analysis-chip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.analysis-chip-label {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.analysis-chip-value {
+  color: var(--color-text);
+  text-align: right;
+  font-weight: 600;
 }
 
 .graph-box {
   margin-top: 1rem;
   height: 100px;
-  background: rgba(0,0,0,0.5);
+  background: rgba(255,255,255,0.4);
   border-radius: 4px;
   overflow: hidden;
-  border: 1px solid rgba(0, 255, 255, 0.2);
+  border: 1px solid rgba(107, 94, 74, 0.4);
 }
 
 .status-message {
   margin-top: 1rem;
-  font-size: 0.85rem;
+  font-size: 0.95rem;
   text-align: center;
   color: var(--color-primary);
   font-family: var(--font-data);
-  text-transform: uppercase;
+  font-weight: bold;
   animation: blink 2s infinite;
 }
 
@@ -382,41 +488,191 @@ body[data-threat="over"] .rift {
   50% { opacity: 0.5; }
 }
 
-/* Bottom: Tools */
-.tools-panel {
-  position: absolute;
-  bottom: 2rem;
-  left: 50%;
-  transform: translateX(-50%);
+/* Bottom: Taskbar */
+.taskbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 52px;
   display: flex;
-  gap: 1rem;
-  padding: 1rem 2rem;
+  align-items: center;
+  gap: 4px;
+  padding: 0 16px;
+  background: rgba(235, 226, 208, 0.95);
+  border-top: 1px solid rgba(107, 94, 74, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 10000;
+  pointer-events: auto;
+  box-shadow: 0 -2px 12px rgba(44, 36, 27, 0.1);
 }
 
+.taskbar-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.taskbar-divider {
+  width: 1px;
+  height: 28px;
+  background: rgba(107, 94, 74, 0.3);
+  margin: 0 6px;
+}
+
+.taskbar-spacer {
+  flex: 1;
+}
+
+.taskbar-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 4px 10px;
+  min-width: 48px;
+  height: 42px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: var(--font-main);
+}
+
+.taskbar-btn:hover {
+  background: rgba(107, 94, 74, 0.12);
+  border-color: rgba(107, 94, 74, 0.3);
+}
+
+.taskbar-btn.active {
+  background: rgba(107, 94, 74, 0.2);
+  border-color: var(--color-primary);
+  box-shadow: inset 0 -2px 0 var(--color-primary);
+}
+
+.taskbar-key {
+  font-size: 0.6rem;
+  font-family: var(--font-data);
+  color: var(--color-text-muted);
+  background: rgba(107, 94, 74, 0.1);
+  border: 1px solid rgba(107, 94, 74, 0.25);
+  border-radius: 2px;
+  padding: 0px 4px;
+  line-height: 1.4;
+  font-weight: 700;
+}
+
+.taskbar-label {
+  font-size: 0.75rem;
+  color: var(--color-text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.taskbar-btn.active .taskbar-label {
+  color: var(--color-primary);
+}
+
+.taskbar-btn-warn { border-color: rgba(180, 130, 0, 0.3); }
+.taskbar-btn-warn .taskbar-label { color: #8b6914; }
+.taskbar-btn-warn:hover { background: rgba(180, 130, 0, 0.1); }
+
+.taskbar-btn-danger { border-color: rgba(180, 50, 40, 0.3); }
+.taskbar-btn-danger .taskbar-label { color: #8b0000; }
+.taskbar-btn-danger:hover { background: rgba(180, 50, 40, 0.1); }
+
+.taskbar-btn-submit {
+  background: rgba(139, 0, 0, 0.08);
+  border-color: rgba(139, 0, 0, 0.3);
+}
+.taskbar-btn-submit .taskbar-label { color: var(--color-primary); font-weight: 700; }
+.taskbar-btn-submit:hover { background: rgba(139, 0, 0, 0.15); }
+
+.taskbar-btn-settings {
+  border-color: rgba(107, 94, 74, 0.2);
+}
+.taskbar-btn-settings .taskbar-label { font-size: 1.1rem; }
+
+.taskbar-select {
+  padding: 4px 8px;
+  background: rgba(255,255,255,0.6);
+  color: var(--color-text);
+  border: 1px solid rgba(107, 94, 74, 0.3);
+  border-radius: 3px;
+  font-family: var(--font-data);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Keep tool-btn for other panels (archive, analyzer) */
 .tool-btn {
   background: transparent;
   border: 1px solid var(--color-text-muted);
   color: var(--color-text);
   font-family: var(--font-main);
   padding: 0.5rem 1.5rem;
-  border-radius: 20px;
+  border-radius: 2px;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-size: 0.9rem;
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .tool-btn:hover {
-  background: rgba(255,255,255,0.1);
+  background: rgba(107, 94, 74, 0.1);
   border-color: var(--color-text);
 }
 
 .tool-btn.active {
-  background: rgba(0, 255, 255, 0.1);
-  border-color: var(--color-secondary);
-  color: var(--color-secondary);
-  box-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
+  background: rgba(107, 94, 74, 0.2);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  box-shadow: inset 0 0 5px rgba(139,0,0,0.1);
+}
+
+.ui-pulse {
+  animation: uiPulse 0.45s ease-out;
+}
+
+.ui-pulse-soft {
+  animation: uiPulseSoft 0.45s ease-out;
+}
+
+.ui-success {
+  animation: uiSuccessFlash 0.55s ease-out;
+}
+
+.ui-shake {
+  animation: uiShake 0.34s ease-out;
+}
+
+@keyframes uiPulse {
+  0% { filter: brightness(1); box-shadow: 2px 4px 15px rgba(44, 36, 27, 0.15); }
+  35% { filter: brightness(1.05); box-shadow: 0 0 15px rgba(139, 0, 0, 0.2); }
+  100% { filter: brightness(1); box-shadow: 2px 4px 15px rgba(44, 36, 27, 0.15); }
+}
+
+@keyframes uiPulseSoft {
+  0% { filter: brightness(1); }
+  40% { filter: brightness(1.05); }
+  100% { filter: brightness(1); }
+}
+
+@keyframes uiSuccessFlash {
+  0% { box-shadow: 2px 4px 15px rgba(44, 36, 27, 0.15); }
+  40% { box-shadow: 0 0 15px rgba(85, 107, 47, 0.4); }
+  100% { box-shadow: 2px 4px 15px rgba(44, 36, 27, 0.15); }
+}
+
+@keyframes uiShake {
+  0%, 100% { filter: brightness(1); }
+  20% { transform: translateX(-3px); }
+  50% { transform: translateX(4px); }
+  75% { transform: translateX(-2px); }
 }
 
 .tool-btn.danger {
@@ -425,6 +681,44 @@ body[data-threat="over"] .rift {
 }
 
 .tool-btn.danger:hover {
-  background: rgba(255, 51, 102, 0.1);
-  box-shadow: 0 0 10px rgba(255, 51, 102, 0.2);
+  background: rgba(139, 0, 0, 0.1);
+  box-shadow: inset 0 0 5px rgba(139,0,0,0.1);
+}
+
+.ui-modal {
+  position: fixed;
+  inset: auto 1rem 1rem auto;
+  z-index: 9500;
+  display: none;
+}
+
+.ui-modal-card {
+  max-width: 280px;
+  padding: 0.85rem 0.95rem;
+  background: #e1d5c1;
+  border: 2px solid #4b3e2a;
+  border-radius: 4px;
+  color: var(--color-text);
+  font-family: var(--font-data);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  box-shadow: 4px 6px 20px rgba(44, 36, 27, 0.2);
+}
+
+@media (max-width: 1200px) {
+  .rift-panel { width: 330px; }
+  .archive-panel, .analyzer-panel { width: 290px; }
+  .tools-panel { width: min(820px, calc(100vw - 4rem)); }
+}
+
+@media (max-width: 900px) {
+  body { overflow: auto; }
+  #ui-layer { min-height: 100vh; padding: 1rem; }
+  .rift-panel, .archive-panel, .analyzer-panel {
+    position: static; transform: none; width: 100%; max-width: none; margin-bottom: 1rem;
+  }
+  .tools-panel {
+    position: static; transform: none; width: 100%; margin-bottom: 1rem;
+  }
+  .tools-panel-content { grid-template-columns: 1fr; }
 }

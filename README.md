@@ -39,6 +39,26 @@
 - **Graphics**: HTML5 `<canvas>` API (실시간 드로잉, 선 분석 및 렌더링)
 - **UI Design**: Arcane Punk (Dark Mode + Neon Glow + Glassmorphism)
 
+## 📁 주요 파일 구조
+
+- `main.js`: 캔버스 입력, UI 이벤트, 렌더 루프, 균열/분석기 연결
+- `recognition.js`: 기본 룬 인식, 부수/조합 인식 코어
+- `arrangement.js`: 다중 룬 공간 배치 분석
+- `boneInteraction.js` / `bone-interaction.js`: 뼈대 상호작용 분석
+- `connectorLine.js`: 뼈대 연결선 구조 어댑터
+- `grammarTokens.js`: 접속사/조사/시제/부정 문법 토큰 정규화
+- `sentence.js`: 원본 문장 분석 로직
+- `sentenceAnalyzer.js`: 명세 기준 문장 결과 정규화
+- `particles.js`: 조사/강도/시제/부정 부가 획 분석
+- `magicPipeline.js`: 전체 분석 결과 `MagicAnalysis` 조립
+- `rift.js`: 차원 균열 미니게임 루프
+- `gameState.js`: 장기 진행 상태 저장소
+- `saveLoad.js`: localStorage 저장/로드 및 오토세이브
+- `eventBus.js`: 시스템 이벤트 허브
+- `discoverySystem.js`: 블라인드 발견/재현 기록
+- `labNotebook.js`: 연구 노트 UI와 토스트 HUD
+- `arcane_sandbox_detailed_implementation_spec.md`: 상세 구현 명세서
+
 ## 🚀 시작하기 (Getting Started)
 
 1. 저장소를 클론하거나 다운로드합니다.
