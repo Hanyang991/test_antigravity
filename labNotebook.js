@@ -161,8 +161,9 @@ function createNotebookTab() {
   tabBar.id = 'archive-tab-bar';
   tabBar.style.cssText = `
     display: flex;
+    flex-wrap: wrap;
     gap: 2px;
-    margin-top: 6px;
+    flex: 1 1 auto;
   `;
 
   tabBar.innerHTML = `
@@ -187,7 +188,7 @@ function createNotebookTab() {
     <button class="archive-tab" data-tab="expedition">탐사</button>
   `;
 
-  header.appendChild(tabBar);
+  header.insertBefore(tabBar, header.firstChild);
 
   // 연구 노트 컨텐츠 패널
   const content = archivePanel.querySelector('.panel-content');
@@ -694,47 +695,33 @@ function openNamingInline(card, signature) {
 function createResourceHUD() {
   const hud = document.createElement('div');
   hud.id = 'resource-hud';
-  hud.style.cssText = `
-    position: fixed;
-    bottom: 12px;
-    right: 12px;
-    display: flex;
-    gap: 12px;
-    padding: 6px 14px;
-    background: rgba(10, 5, 20, 0.85);
-    border: 1px solid rgba(138, 43, 226, 0.3);
-    border-radius: 8px;
-    backdrop-filter: blur(8px);
-    z-index: 9000;
-    font-family: var(--font-data, 'Share Tech Mono', monospace);
-    font-size: 0.75rem;
-    color: #ccc;
-  `;
+  hud.className = 'top-status-bar';
 
   hud.innerHTML = `
-    <span title="연구비">💰 <span id="hud-funds">${gameState.resources.researchFunds}</span></span>
-    <span title="명성">⭐ <span id="hud-rep">${gameState.resources.reputation}</span></span>
-    <span title="학위 점수">🎓 <span id="hud-degree">${gameState.resources.degreeScore}</span></span>
-    <span title="현재 일정">📅 <span id="hud-week">${gameState.progression.currentWeek}</span>주 <span id="hud-day">${gameState.progression.currentDay}</span>일</span>
-    <span title="현재 Phase">🜁 <span id="hud-phase">${gameState.progression.currentPhase}</span></span>
+    <span class="hud-chip" title="연구비">💰 <span id="hud-funds">${gameState.resources.researchFunds}</span>G</span>
+    <span class="hud-chip" title="명성">⭐ <span id="hud-rep">${gameState.resources.reputation}</span></span>
+    <span class="hud-chip" title="학위 점수">🎓 <span id="hud-degree">${gameState.resources.degreeScore}</span></span>
+    <span class="hud-divider" aria-hidden="true"></span>
+    <span class="hud-chip" title="누적 발견">🔬 발견 <span id="hud-discoveries">0</span></span>
+    <span class="hud-chip" title="수락된 논문">📜 논문 <span id="hud-papers">0</span></span>
+    <span class="hud-chip" title="진행 중인 답사">🧭 답사 <span id="hud-expeditions">0</span></span>
+    <span class="hud-chip" title="정설 불일치">⚠ 불일치 <span id="hud-mismatches">0</span></span>
+    <span class="hud-divider" aria-hidden="true"></span>
+    <span class="hud-chip" title="현재 일정">📅 <span id="hud-week">${gameState.progression.currentWeek}</span>주 <span id="hud-day">${gameState.progression.currentDay}</span>일</span>
+    <span class="hud-chip" title="현재 Phase">🜁 Phase <span id="hud-phase">${gameState.progression.currentPhase}</span></span>
   `;
 
   document.body.appendChild(hud);
 }
 
 export function refreshResourceHUD() {
-  const funds = document.getElementById('hud-funds');
-  const rep = document.getElementById('hud-rep');
-  const degree = document.getElementById('hud-degree');
-  const week = document.getElementById('hud-week');
-  const day = document.getElementById('hud-day');
-  const phase = document.getElementById('hud-phase');
-  if (funds) funds.textContent = gameState.resources.researchFunds;
-  if (rep) rep.textContent = gameState.resources.reputation;
-  if (degree) degree.textContent = gameState.resources.degreeScore;
-  if (week) week.textContent = gameState.progression.currentWeek;
-  if (day) day.textContent = gameState.progression.currentDay;
-  if (phase) phase.textContent = gameState.progression.currentPhase;
+  const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  setText('hud-funds', gameState.resources.researchFunds);
+  setText('hud-rep', gameState.resources.reputation);
+  setText('hud-degree', gameState.resources.degreeScore);
+  setText('hud-week', gameState.progression.currentWeek);
+  setText('hud-day', gameState.progression.currentDay);
+  setText('hud-phase', gameState.progression.currentPhase);
 }
 
 // ── 이벤트 핸들러 ─────────────────────────────────────────────────

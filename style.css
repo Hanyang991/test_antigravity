@@ -128,6 +128,19 @@ body {
   margin-bottom: 0.85rem;
 }
 
+/* Header variant for the archive panel (no h2 title — tabs are primary) */
+.panel-header-tabs {
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.85rem;
+  border-bottom: 1px dashed rgba(107, 94, 74, 0.4);
+}
+
+.panel-header-tabs .panel-header-actions {
+  flex: 0 0 auto;
+}
+
 .panel-header-actions {
   display: flex;
   flex-wrap: wrap;
@@ -172,16 +185,58 @@ body {
   transform: rotate(-90deg);
 }
 
+/* Top Status Bar (consolidated resource HUD + research-loop chips) */
+.top-status-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0.4rem 0.85rem;
+  padding: 0.35rem 1rem;
+  background: rgba(40, 28, 18, 0.88);
+  border-bottom: 1px solid rgba(139, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 9000;
+  font-family: var(--font-data, 'Cormorant Garamond', serif);
+  font-size: 0.78rem;
+  color: #efe3cb;
+  pointer-events: auto;
+}
+
+.top-status-bar .hud-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+.top-status-bar .hud-chip span {
+  color: #ffe9b6;
+  font-weight: 600;
+}
+
+.top-status-bar .hud-divider {
+  width: 1px;
+  height: 0.9rem;
+  background: rgba(255, 233, 182, 0.25);
+  display: inline-block;
+}
+
 /* Top Center: Abyssal Rift Game (Now Professor Assignment) */
 .rift-panel {
   position: absolute;
-  top: 1rem;
+  top: 2.5rem;
   left: 50%;
   transform: translateX(-50%);
   width: 420px;
   max-width: calc(100vw - 4rem);
   padding: 0.85rem 1rem;
-  max-height: calc(100vh - 12rem);
+  max-height: calc(100vh - 14rem);
   overflow-y: auto;
 }
 
@@ -335,7 +390,7 @@ body[data-threat="over"] .rift {
 /* Top Left: Archive */
 .archive-panel {
   position: absolute;
-  top: 2rem;
+  top: 3.5rem;
   left: 2rem;
   width: 320px;
   max-height: calc(100vh - 14rem);
@@ -403,7 +458,7 @@ body[data-threat="over"] .rift {
 /* Right Side: Analyzer */
 .analyzer-panel {
   position: absolute;
-  top: 2rem;
+  top: 3.5rem;
   right: 2rem;
   width: 320px;
   max-height: calc(100vh - 14rem);

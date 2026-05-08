@@ -48,8 +48,7 @@
 
         <!-- Top Left: Archives -->
         <div class="panel archive-panel glass-panel">
-          <div class="panel-header">
-            <h2>고문헌 보관소</h2>
+          <div class="panel-header panel-header-tabs">
             <div class="panel-header-actions">
               <button class="panel-toggle" type="button" data-panel-toggle aria-expanded="true" aria-label="고문헌 보관소 접기">▾</button>
             </div>
@@ -127,22 +126,11 @@
               <div class="analysis-block-body" id="analysis-grammar-content">아직 해석된 문법 토큰이 없습니다.</div>
             </div>
 
-            <div id="analysis-academic-block" class="analysis-subsection">
-              <div class="analysis-block-header">
-                <span>연구 루프</span>
-                <button class="section-toggle" type="button" data-section-toggle="analysis-academic-content" aria-expanded="true" aria-label="연구 루프 접기">▾</button>
-              </div>
-              <div class="analysis-block-body" id="analysis-academic-content">관측값을 기록하고, 재현을 쌓아 논문으로 연결하세요.</div>
-            </div>
-
             <div class="graph-box">
               <canvas id="graph-canvas" width="260" height="100"></canvas>
             </div>
             
             <div class="status-message" id="system-status">대기 중...</div>
-            <div style="margin-top: 10px; text-align: center;">
-              <button class="tool-btn" id="btn-cast-magic" style="display:none; width: 100%; border-color: var(--color-primary); color: var(--color-primary);">마법진 제출 (Submit Assignment)</button>
-            </div>
           </div>
         </div>
 
