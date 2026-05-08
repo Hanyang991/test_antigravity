@@ -20,6 +20,8 @@ import { getCurrentPhaseInfo } from './phase.js';
 import { getMessages, getUnreadCount, markRead } from './inboxSystem.js';
 import { getJournalPapers, getCanonForPaper } from './journalSystem.js';
 import { SENDER_ROLES } from './data/inboxSeed.js';
+import { resetState } from './gameState.js';
+import { clearSave, saveGame } from './saveLoad.js';
 
 // ── 초기화 ────────────────────────────────────────────────────────
 let initialized = false;
@@ -689,6 +691,7 @@ function createResourceHUD() {
       <button class="scene-btn" type="button" data-scene="expedition">🧭 답사</button>
       <button class="scene-btn" type="button" data-scene="inbox">📬 메일<span class="scene-btn-badge" id="scene-inbox-badge" hidden>0</span></button>
       <button class="scene-btn" type="button" data-scene="journal">📰 학계</button>
+      <button class="scene-btn" type="button" data-scene="settings">⚙ 환경설정</button>
     </nav>
     <span class="hud-divider" aria-hidden="true"></span>
     <span class="hud-chip" title="연구비">💰 <span id="hud-funds">${gameState.resources.researchFunds}</span>G</span>
@@ -781,6 +784,59 @@ function setupScenes() {
   `;
   document.body.appendChild(inboxScene);
 
+  // 환경설정 씬
+  const settingsScene = document.createElement('div');
+  settingsScene.id = 'scene-settings';
+  settingsScene.className = 'app-scene';
+  settingsScene.dataset.scene = 'settings';
+  settingsScene.innerHTML = `
+    <div class="scene-frame settings-frame">
+      <header class="scene-header">
+        <span class="scene-eyebrow">시스템</span>
+        <h1>환경설정</h1>
+        <p>저장 동작과 표시 옵션을 조정합니다. 변경 사항은 즉시 반영됩니다.</p>
+      </header>
+      <section class="settings-section">
+        <h2 class="settings-section-title">저장</h2>
+        <label class="settings-row" for="set-autosave">
+          <span class="settings-row-text">
+            <span class="settings-row-title">자동 저장</span>
+            <span class="settings-row-desc">5분 간격 + 주요 행동 시 localStorage 에 자동 저장합니다.</span>
+          </span>
+          <input type="checkbox" id="set-autosave" class="settings-toggle">
+        </label>
+      </section>
+      <section class="settings-section">
+        <h2 class="settings-section-title">표시</h2>
+        <label class="settings-row" for="set-blind">
+          <span class="settings-row-text">
+            <span class="settings-row-title">미공개 발견 가리기</span>
+            <span class="settings-row-desc">아직 명명되지 않은 발견의 정식 이름·메커니즘을 숨깁니다.</span>
+          </span>
+          <input type="checkbox" id="set-blind" class="settings-toggle">
+        </label>
+        <label class="settings-row" for="set-debug">
+          <span class="settings-row-text">
+            <span class="settings-row-title">디버그: 내부 명칭 표시</span>
+            <span class="settings-row-desc">개발용 룬/효과의 코드명을 함께 표시합니다.</span>
+          </span>
+          <input type="checkbox" id="set-debug" class="settings-toggle">
+        </label>
+      </section>
+      <section class="settings-section settings-danger">
+        <h2 class="settings-section-title">위험 영역</h2>
+        <div class="settings-row settings-row-stack">
+          <span class="settings-row-text">
+            <span class="settings-row-title">전체 초기화</span>
+            <span class="settings-row-desc">모든 저장 데이터(자원·진행도·발견·논문·메일 등)를 지우고 처음부터 다시 시작합니다. 되돌릴 수 없습니다.</span>
+          </span>
+          <button id="btn-reset-all" type="button" class="settings-danger-btn">전체 초기화</button>
+        </div>
+      </section>
+    </div>
+  `;
+  document.body.appendChild(settingsScene);
+
   // 학계(저널) 씬
   const journalScene = document.createElement('div');
   journalScene.id = 'scene-journal';
@@ -829,6 +885,73 @@ function setActiveScene(name) {
   if (name === 'expedition') refreshExpeditionList();
   if (name === 'inbox') refreshInbox();
   if (name === 'journal') refreshJournal();
+  if (name === 'settings') refreshSettings();
+}
+
+// ── 환경설정 ──────────────────────────────────────────────────────
+let settingsBound = false;
+
+function refreshSettings() {
+  const autosaveEl = document.getElementById('set-autosave');
+  const blindEl = document.getElementById('set-blind');
+  const debugEl = document.getElementById('set-debug');
+  if (!autosaveEl || !blindEl || !debugEl) return;
+
+  autosaveEl.checked = !!gameState.settings.autosave;
+  blindEl.checked = !!gameState.settings.blindDiscovery;
+  debugEl.checked = !!gameState.settings.debugShowLegacyNames;
+
+  if (settingsBound) return;
+  settingsBound = true;
+
+  autosaveEl.addEventListener('change', () => {
+    gameState.settings.autosave = autosaveEl.checked;
+    saveGame();
+    showToast(autosaveEl.checked ? '자동 저장 켜짐' : '자동 저장 꺼짐', 'info');
+  });
+  blindEl.addEventListener('change', () => {
+    gameState.settings.blindDiscovery = blindEl.checked;
+    saveGame();
+    refreshNotebookList();
+  });
+  debugEl.addEventListener('change', () => {
+    gameState.settings.debugShowLegacyNames = debugEl.checked;
+    saveGame();
+    refreshNotebookList();
+    refreshDictionaryList();
+  });
+
+  const resetBtn = document.getElementById('btn-reset-all');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => handleResetAll(resetBtn));
+  }
+}
+
+function handleResetAll(btn) {
+  const confirmed = window.confirm(
+    '모든 저장 데이터가 삭제됩니다.\n\n' +
+    '· 자원 / 학적 / 발견 / 논문 / 답사 / 메일\n' +
+    '· 정설 갱신 내역, 인용\n\n' +
+    '되돌릴 수 없습니다. 정말 진행할까요?'
+  );
+  if (!confirmed) return;
+
+  try {
+    clearSave();
+    resetState();
+  } catch (err) {
+    console.error('[Settings] reset 실패:', err);
+    showToast('초기화 실패 — 콘솔 확인', 'error');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '초기화 중…';
+  }
+  setTimeout(() => {
+    window.location.reload();
+  }, 200);
 }
 
 // ── 메일함 ────────────────────────────────────────────────────────
