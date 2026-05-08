@@ -104,8 +104,10 @@ body {
 
 .panel-header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
+  gap: 0.5rem;
   border-bottom: 1px solid rgba(107, 94, 74, 0.3);
   padding-bottom: 0.5rem;
   margin-bottom: 1rem;
@@ -115,8 +117,11 @@ body {
   font-size: 1.2rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 2px;
+  letter-spacing: 1px;
   color: var(--color-secondary);
+  word-break: keep-all;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .panel-header-compact {
@@ -125,6 +130,7 @@ body {
 
 .panel-header-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.6rem;
 }
@@ -181,6 +187,7 @@ body {
   font-size: 0.8rem;
   color: var(--color-secondary);
   letter-spacing: 1px;
+  white-space: nowrap;
 }
 
 .threat-row {
@@ -346,6 +353,7 @@ body[data-threat="over"] .rift {
   border-radius: 4px;
   color: var(--color-primary);
   font-weight: bold;
+  white-space: nowrap;
 }
 
 .lore-text {
