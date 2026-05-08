@@ -67,6 +67,10 @@ export const gameState = {
     citations: [],
   },
 
+  inbox: {
+    messages: [],
+  },
+
   settings: {
     blindDiscovery: true,
     debugShowLegacyNames: false,
@@ -110,6 +114,7 @@ export function resetState() {
     expeditions: { active: [], completed: [], unlockedSiteIds: [] },
     economy: { activeGrants: [], activeContracts: [], scrollOrders: [], weeklyIncome: [] },
     academic: { canonOverrides: {}, canonMismatches: [], npcRelations: {}, citations: [] },
+    inbox: { messages: [] },
     settings: { blindDiscovery: true, debugShowLegacyNames: false, autosave: true },
   };
   deepMerge(gameState, fresh);

@@ -16,7 +16,12 @@ import { createPaperDraft, getEligiblePaperPlans, getSocieties, submitPaper } fr
 import { getExpeditionSites, startExpedition } from './expedition.js';
 import { applyForGrant, getGrantOffers, getContractOffers, sellScroll, signContract } from './economy.js';
 import { advanceDay } from './schedule.js';
-import { getCurrentPhaseInfo, takeFinalExam, takeMidtermExam } from './phase.js';
+import { getCurrentPhaseInfo } from './phase.js';
+import { getMessages, getUnreadCount, markRead } from './inboxSystem.js';
+import { getJournalPapers, getCanonForPaper } from './journalSystem.js';
+import { SENDER_ROLES } from './data/inboxSeed.js';
+import { resetState } from './gameState.js';
+import { clearSave, saveGame } from './saveLoad.js';
 
 // ── 초기화 ────────────────────────────────────────────────────────
 let initialized = false;
@@ -29,6 +34,7 @@ export function initLabNotebook() {
   createToastContainer();
   createNotebookTab();
   createResourceHUD();
+  setupScenes();
 
   // 이벤트 구독
   on('discovery:new', handleNewDiscovery);
@@ -50,9 +56,12 @@ export function initLabNotebook() {
   on('phase:advanced', handlePhaseAdvanced);
   on('exam:midtermTaken', handleMidtermTaken);
   on('exam:finalTaken', handleFinalTaken);
+  on('inbox:received', handleInboxChange);
+  on('inbox:read', handleInboxChange);
 
   updateNotebookBadge();
   updatePaperBadge();
+  refreshInboxBadge();
 }
 
 // ── 토스트 시스템 ─────────────────────────────────────────────────
@@ -161,8 +170,9 @@ function createNotebookTab() {
   tabBar.id = 'archive-tab-bar';
   tabBar.style.cssText = `
     display: flex;
+    flex-wrap: wrap;
     gap: 2px;
-    margin-top: 6px;
+    flex: 1 1 auto;
   `;
 
   tabBar.innerHTML = `
@@ -187,7 +197,7 @@ function createNotebookTab() {
     <button class="archive-tab" data-tab="expedition">탐사</button>
   `;
 
-  header.appendChild(tabBar);
+  header.insertBefore(tabBar, header.firstChild);
 
   // 연구 노트 컨텐츠 패널
   const content = archivePanel.querySelector('.panel-content');
@@ -521,31 +531,25 @@ function refreshExpeditionList() {
   `).join('');
 
   list.innerHTML = `
-    <div style="background: rgba(20,20,40,0.55); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 10px; margin-bottom:10px;">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <span style="color:#e6d7ff; font-size:0.82rem; font-weight:600;">${phaseInfo.name}</span>
-        <span style="color:#9a8cbc; font-size:0.68rem;">Phase ${phaseInfo.phase}</span>
+    <div class="scene-meta-card">
+      <div class="scene-meta-row">
+        <span class="scene-meta-title">${phaseInfo.name}</span>
+        <span class="scene-meta-phase">Phase ${phaseInfo.phase}</span>
       </div>
-      <div style="display:flex; gap:6px; margin-top:8px;">
-        <button id="btn-advance-day" style="${buttonStyle('neutral')}">하루 진행</button>
-        <button id="btn-midterm" style="${buttonStyle('neutral')}">중간고사</button>
-        <button id="btn-final" style="${buttonStyle('neutral')}">기말고사</button>
-      </div>
-      <div style="color:#8d8d9a; font-size:0.68rem; margin-top:8px;">
-        다음 조건: ${renderPhaseRequirement(phaseInfo.requirements)}
-      </div>
+      <div class="scene-meta-note">다음 승급 조건 — ${renderPhaseRequirement(phaseInfo.requirements)}</div>
+      <div class="scene-meta-note scene-meta-hint">중간/기말고사는 학기 일정상 8주차·16주차에 지도교수가 자동으로 시행합니다.</div>
     </div>
-    <div style="color:#9de8ff; font-size:0.74rem; font-family:var(--font-data, monospace);">진행 중 탐사</div>
+    <div class="scene-section-label">진행 중 탐사</div>
     ${activeHtml}
-    <div style="color:#9de8ff; font-size:0.74rem; font-family:var(--font-data, monospace); margin-top:10px;">탐사지</div>
+    <div class="scene-section-label">탐사지</div>
     ${sitesHtml || '<div style="color:#666;font-size:0.72rem;padding:6px 0;">현재 해금된 탐사지가 없습니다.</div>'}
-    <div style="color:#ffe4a8; font-size:0.74rem; font-family:var(--font-data, monospace); margin-top:10px;">연구비</div>
+    <div class="scene-section-label scene-section-label-warm">연구비</div>
     ${grantsHtml}
     ${contractsHtml}
     <div style="margin-top:10px;">
       <button id="btn-sell-scroll" style="${buttonStyle('purple')}">현재 현상 스크롤 판매</button>
     </div>
-    <div style="color:#98f6d7; font-size:0.74rem; font-family:var(--font-data, monospace); margin-top:10px;">최근 탐사 결과</div>
+    <div class="scene-section-label scene-section-label-cool">최근 탐사 결과</div>
     ${completedHtml || '<div style="color:#666;font-size:0.72rem;padding:6px 0;">아직 탐사 완료 기록이 없습니다.</div>'}
   `;
 
@@ -574,22 +578,6 @@ function refreshExpeditionList() {
     });
   });
 
-  const advanceDayBtn = document.getElementById('btn-advance-day');
-  if (advanceDayBtn) {
-    advanceDayBtn.addEventListener('click', () => {
-      advanceDay(1);
-      refreshExpeditionList();
-      refreshResourceHUD();
-    });
-  }
-  const midtermBtn = document.getElementById('btn-midterm');
-  if (midtermBtn) {
-    midtermBtn.addEventListener('click', () => takeMidtermExam());
-  }
-  const finalBtn = document.getElementById('btn-final');
-  if (finalBtn) {
-    finalBtn.addEventListener('click', () => takeFinalExam());
-  }
   const sellScrollBtn = document.getElementById('btn-sell-scroll');
   if (sellScrollBtn) {
     sellScrollBtn.addEventListener('click', () => {
@@ -694,47 +682,422 @@ function openNamingInline(card, signature) {
 function createResourceHUD() {
   const hud = document.createElement('div');
   hud.id = 'resource-hud';
-  hud.style.cssText = `
-    position: fixed;
-    bottom: 12px;
-    right: 12px;
-    display: flex;
-    gap: 12px;
-    padding: 6px 14px;
-    background: rgba(10, 5, 20, 0.85);
-    border: 1px solid rgba(138, 43, 226, 0.3);
-    border-radius: 8px;
-    backdrop-filter: blur(8px);
-    z-index: 9000;
-    font-family: var(--font-data, 'Share Tech Mono', monospace);
-    font-size: 0.75rem;
-    color: #ccc;
+  hud.className = 'top-status-bar';
+
+  const phaseInfo = getCurrentPhaseInfo();
+  hud.innerHTML = `
+    <nav class="scene-nav" aria-label="현재 위치">
+      <button class="scene-btn active" type="button" data-scene="lab">🜂 연구실</button>
+      <button class="scene-btn" type="button" data-scene="expedition">🧭 답사</button>
+      <button class="scene-btn" type="button" data-scene="inbox">📬 메일<span class="scene-btn-badge" id="scene-inbox-badge" hidden>0</span></button>
+      <button class="scene-btn" type="button" data-scene="journal">📰 학계</button>
+      <button class="scene-btn" type="button" data-scene="settings">⚙ 환경설정</button>
+    </nav>
+    <span class="hud-divider" aria-hidden="true"></span>
+    <span class="hud-chip" title="연구비">💰 <span id="hud-funds">${gameState.resources.researchFunds}</span>G</span>
+    <span class="hud-chip" title="명성">⭐ <span id="hud-rep">${gameState.resources.reputation}</span></span>
+    <span class="hud-chip" title="학위 점수">🎓 <span id="hud-degree">${gameState.resources.degreeScore}</span></span>
+    <span class="hud-divider" aria-hidden="true"></span>
+    <span class="hud-chip" title="누적 발견">🔬 발견 <span id="hud-discoveries">0</span></span>
+    <span class="hud-chip" title="수락된 논문">📜 논문 <span id="hud-papers">0</span></span>
+    <span class="hud-chip" title="진행 중인 답사">🧭 답사 <span id="hud-expeditions">0</span></span>
+    <span class="hud-chip" title="정설 불일치">⚠ 불일치 <span id="hud-mismatches">0</span></span>
+    <span class="hud-spacer" aria-hidden="true"></span>
+    <span class="hud-chip hud-phase-chip" title="학적 / 학기">🎓 <span id="hud-phase-name">${phaseInfo.name}</span> · <span id="hud-week">${gameState.progression.currentWeek}</span>주 <span id="hud-day">${gameState.progression.currentDay}</span>일</span>
+    <button id="btn-next-day" class="hud-action" type="button" title="하루 진행">다음 날 ▶</button>
   `;
 
-  hud.innerHTML = `
-    <span title="연구비">💰 <span id="hud-funds">${gameState.resources.researchFunds}</span></span>
-    <span title="명성">⭐ <span id="hud-rep">${gameState.resources.reputation}</span></span>
-    <span title="학위 점수">🎓 <span id="hud-degree">${gameState.resources.degreeScore}</span></span>
-    <span title="현재 일정">📅 <span id="hud-week">${gameState.progression.currentWeek}</span>주 <span id="hud-day">${gameState.progression.currentDay}</span>일</span>
-    <span title="현재 Phase">🜁 <span id="hud-phase">${gameState.progression.currentPhase}</span></span>
-  `;
+  const nextDayBtn = hud.querySelector('#btn-next-day');
+  if (nextDayBtn) {
+    nextDayBtn.addEventListener('click', () => {
+      advanceDay(1);
+      refreshResourceHUD();
+      refreshExpeditionList();
+    });
+  }
 
   document.body.appendChild(hud);
 }
 
 export function refreshResourceHUD() {
-  const funds = document.getElementById('hud-funds');
-  const rep = document.getElementById('hud-rep');
-  const degree = document.getElementById('hud-degree');
-  const week = document.getElementById('hud-week');
-  const day = document.getElementById('hud-day');
-  const phase = document.getElementById('hud-phase');
-  if (funds) funds.textContent = gameState.resources.researchFunds;
-  if (rep) rep.textContent = gameState.resources.reputation;
-  if (degree) degree.textContent = gameState.resources.degreeScore;
-  if (week) week.textContent = gameState.progression.currentWeek;
-  if (day) day.textContent = gameState.progression.currentDay;
-  if (phase) phase.textContent = gameState.progression.currentPhase;
+  const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  setText('hud-funds', gameState.resources.researchFunds);
+  setText('hud-rep', gameState.resources.reputation);
+  setText('hud-degree', gameState.resources.degreeScore);
+  setText('hud-week', gameState.progression.currentWeek);
+  setText('hud-day', gameState.progression.currentDay);
+  setText('hud-phase-name', getCurrentPhaseInfo().name);
+}
+
+// ── 씬 시스템 (연구실 / 답사 / 학회) ──────────────────────────────
+const LAB_SCENE_IDS = ['rift-container', 'magic-canvas', 'ui-layer'];
+
+function setupScenes() {
+  // 답사 씬 컨테이너 생성
+  const expeditionScene = document.createElement('div');
+  expeditionScene.id = 'scene-expedition';
+  expeditionScene.className = 'app-scene';
+  expeditionScene.dataset.scene = 'expedition';
+  expeditionScene.innerHTML = `
+    <div class="scene-frame">
+      <header class="scene-header">
+        <span class="scene-eyebrow">현장 조사</span>
+        <h1>답사</h1>
+        <p>학과 외부의 현장을 직접 답사하여 자료와 발견을 수집합니다.</p>
+      </header>
+      <div class="scene-body" id="scene-expedition-body"></div>
+    </div>
+  `;
+  document.body.appendChild(expeditionScene);
+
+  // archive 패널의 expedition-panel 을 답사 씬으로 이동
+  const expPanel = document.getElementById('expedition-panel');
+  const sceneBody = expeditionScene.querySelector('#scene-expedition-body');
+  if (expPanel && sceneBody) {
+    expPanel.style.display = '';
+    sceneBody.appendChild(expPanel);
+  }
+
+  // archive 의 탐사 탭 버튼 숨김 (답사는 이제 별도 씬)
+  const expTab = document.querySelector('.archive-tab[data-tab="expedition"]');
+  if (expTab) expTab.style.display = 'none';
+
+  // 메일함 씬
+  const inboxScene = document.createElement('div');
+  inboxScene.id = 'scene-inbox';
+  inboxScene.className = 'app-scene';
+  inboxScene.dataset.scene = 'inbox';
+  inboxScene.innerHTML = `
+    <div class="scene-frame inbox-frame">
+      <header class="scene-header">
+        <span class="scene-eyebrow">학내 통신</span>
+        <h1>메일함</h1>
+        <p>학과 사무실·지도교수·학회·후원 기관에서 발신한 공식 통신을 확인합니다.</p>
+      </header>
+      <div class="inbox-layout">
+        <div class="inbox-list" id="inbox-list" aria-label="메일 목록"></div>
+        <div class="inbox-detail" id="inbox-detail" aria-live="polite">
+          <div class="inbox-detail-empty">왼쪽에서 메일을 선택하세요.</div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(inboxScene);
+
+  // 환경설정 씬
+  const settingsScene = document.createElement('div');
+  settingsScene.id = 'scene-settings';
+  settingsScene.className = 'app-scene';
+  settingsScene.dataset.scene = 'settings';
+  settingsScene.innerHTML = `
+    <div class="scene-frame settings-frame">
+      <header class="scene-header">
+        <span class="scene-eyebrow">시스템</span>
+        <h1>환경설정</h1>
+        <p>저장 동작과 표시 옵션을 조정합니다. 변경 사항은 즉시 반영됩니다.</p>
+      </header>
+      <section class="settings-section">
+        <h2 class="settings-section-title">저장</h2>
+        <label class="settings-row" for="set-autosave">
+          <span class="settings-row-text">
+            <span class="settings-row-title">자동 저장</span>
+            <span class="settings-row-desc">5분 간격 + 주요 행동 시 localStorage 에 자동 저장합니다.</span>
+          </span>
+          <input type="checkbox" id="set-autosave" class="settings-toggle">
+        </label>
+      </section>
+      <section class="settings-section">
+        <h2 class="settings-section-title">표시</h2>
+        <label class="settings-row" for="set-blind">
+          <span class="settings-row-text">
+            <span class="settings-row-title">미공개 발견 가리기</span>
+            <span class="settings-row-desc">아직 명명되지 않은 발견의 정식 이름·메커니즘을 숨깁니다.</span>
+          </span>
+          <input type="checkbox" id="set-blind" class="settings-toggle">
+        </label>
+        <label class="settings-row" for="set-debug">
+          <span class="settings-row-text">
+            <span class="settings-row-title">디버그: 내부 명칭 표시</span>
+            <span class="settings-row-desc">개발용 룬/효과의 코드명을 함께 표시합니다.</span>
+          </span>
+          <input type="checkbox" id="set-debug" class="settings-toggle">
+        </label>
+      </section>
+      <section class="settings-section settings-danger">
+        <h2 class="settings-section-title">위험 영역</h2>
+        <div class="settings-row settings-row-stack">
+          <span class="settings-row-text">
+            <span class="settings-row-title">전체 초기화</span>
+            <span class="settings-row-desc">모든 저장 데이터(자원·진행도·발견·논문·메일 등)를 지우고 처음부터 다시 시작합니다. 되돌릴 수 없습니다.</span>
+          </span>
+          <button id="btn-reset-all" type="button" class="settings-danger-btn">전체 초기화</button>
+        </div>
+      </section>
+    </div>
+  `;
+  document.body.appendChild(settingsScene);
+
+  // 학계(저널) 씬
+  const journalScene = document.createElement('div');
+  journalScene.id = 'scene-journal';
+  journalScene.className = 'app-scene';
+  journalScene.dataset.scene = 'journal';
+  journalScene.innerHTML = `
+    <div class="scene-frame">
+      <header class="scene-header">
+        <span class="scene-eyebrow">학술 정기간행물</span>
+        <h1>학계 저널</h1>
+        <p>다른 학파·연구실이 발표한 논문을 열람합니다. 정설과 충돌하는 관측이 있다면 도전 논문 작성을 검토하세요.</p>
+      </header>
+      <div class="journal-grid" id="journal-grid"></div>
+    </div>
+  `;
+  document.body.appendChild(journalScene);
+
+  // 씬 전환 버튼 클릭 처리
+  document.querySelectorAll('.scene-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.scene;
+      if (!target || btn.disabled) return;
+      setActiveScene(target);
+    });
+  });
+
+  setActiveScene('lab');
+}
+
+function setActiveScene(name) {
+  document.body.dataset.scene = name;
+
+  LAB_SCENE_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = name === 'lab' ? '' : 'none';
+  });
+
+  document.querySelectorAll('.app-scene').forEach((scene) => {
+    scene.style.display = scene.dataset.scene === name ? '' : 'none';
+  });
+
+  document.querySelectorAll('.scene-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.scene === name);
+  });
+
+  if (name === 'expedition') refreshExpeditionList();
+  if (name === 'inbox') refreshInbox();
+  if (name === 'journal') refreshJournal();
+  if (name === 'settings') refreshSettings();
+}
+
+// ── 환경설정 ──────────────────────────────────────────────────────
+let settingsBound = false;
+
+function refreshSettings() {
+  const autosaveEl = document.getElementById('set-autosave');
+  const blindEl = document.getElementById('set-blind');
+  const debugEl = document.getElementById('set-debug');
+  if (!autosaveEl || !blindEl || !debugEl) return;
+
+  autosaveEl.checked = !!gameState.settings.autosave;
+  blindEl.checked = !!gameState.settings.blindDiscovery;
+  debugEl.checked = !!gameState.settings.debugShowLegacyNames;
+
+  if (settingsBound) return;
+  settingsBound = true;
+
+  autosaveEl.addEventListener('change', () => {
+    gameState.settings.autosave = autosaveEl.checked;
+    saveGame();
+    showToast(autosaveEl.checked ? '자동 저장 켜짐' : '자동 저장 꺼짐', 'info');
+  });
+  blindEl.addEventListener('change', () => {
+    gameState.settings.blindDiscovery = blindEl.checked;
+    saveGame();
+    refreshNotebookList();
+  });
+  debugEl.addEventListener('change', () => {
+    gameState.settings.debugShowLegacyNames = debugEl.checked;
+    saveGame();
+    refreshNotebookList();
+    refreshDictionaryList();
+  });
+
+  const resetBtn = document.getElementById('btn-reset-all');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => handleResetAll(resetBtn));
+  }
+}
+
+function handleResetAll(btn) {
+  const confirmed = window.confirm(
+    '모든 저장 데이터가 삭제됩니다.\n\n' +
+    '· 자원 / 학적 / 발견 / 논문 / 답사 / 메일\n' +
+    '· 정설 갱신 내역, 인용\n\n' +
+    '되돌릴 수 없습니다. 정말 진행할까요?'
+  );
+  if (!confirmed) return;
+
+  try {
+    clearSave();
+    resetState();
+  } catch (err) {
+    console.error('[Settings] reset 실패:', err);
+    showToast('초기화 실패 — 콘솔 확인', 'error');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '초기화 중…';
+  }
+  setTimeout(() => {
+    window.location.reload();
+  }, 200);
+}
+
+// ── 메일함 ────────────────────────────────────────────────────────
+let selectedMailId = null;
+
+function refreshInbox() {
+  const listEl = document.getElementById('inbox-list');
+  const detailEl = document.getElementById('inbox-detail');
+  if (!listEl || !detailEl) return;
+
+  const messages = getMessages();
+  if (messages.length === 0) {
+    listEl.innerHTML = '<div class="inbox-empty">받은 메일이 없습니다.</div>';
+    detailEl.innerHTML = '<div class="inbox-detail-empty">받은 메일이 없습니다.</div>';
+    return;
+  }
+
+  listEl.innerHTML = messages.map((m) => {
+    const role = SENDER_ROLES[m.senderRole] || SENDER_ROLES.system;
+    return `
+      <button type="button" class="inbox-item${m.read ? '' : ' inbox-item-unread'}${selectedMailId === m.id ? ' inbox-item-active' : ''}"
+              data-mail-id="${m.id}" style="--inbox-accent:${role.accent};">
+        <span class="inbox-item-meta">
+          <span class="inbox-item-sender">${escapeHtml(m.sender)}</span>
+          <span class="inbox-item-when">${m.receivedWeek}주 ${m.receivedDay}일</span>
+        </span>
+        <span class="inbox-item-subject">${escapeHtml(m.subject)}</span>
+      </button>
+    `;
+  }).join('');
+
+  listEl.querySelectorAll('.inbox-item').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.mailId;
+      selectMail(id);
+    });
+  });
+
+  if (!selectedMailId || !messages.find((m) => m.id === selectedMailId)) {
+    selectMail(messages[0].id);
+  } else {
+    renderMailDetail(messages.find((m) => m.id === selectedMailId));
+  }
+}
+
+function selectMail(id) {
+  selectedMailId = id;
+  const mail = getMessages().find((m) => m.id === id);
+  if (!mail) return;
+  if (!mail.read) {
+    markRead(id);
+  }
+  renderMailDetail(mail);
+  document.querySelectorAll('#inbox-list .inbox-item').forEach((btn) => {
+    btn.classList.toggle('inbox-item-active', btn.dataset.mailId === id);
+    if (btn.dataset.mailId === id) btn.classList.remove('inbox-item-unread');
+  });
+}
+
+function renderMailDetail(mail) {
+  const detailEl = document.getElementById('inbox-detail');
+  if (!detailEl || !mail) return;
+  const role = SENDER_ROLES[mail.senderRole] || SENDER_ROLES.system;
+  detailEl.innerHTML = `
+    <div class="inbox-detail-header">
+      <div class="inbox-detail-sender" style="color:${role.accent};">${escapeHtml(mail.sender)}</div>
+      <div class="inbox-detail-when">${mail.receivedWeek}주 ${mail.receivedDay}일 수신</div>
+    </div>
+    <h2 class="inbox-detail-subject">${escapeHtml(mail.subject)}</h2>
+    <div class="inbox-detail-body">${escapeHtml(mail.body).replace(/\n/g, '<br>')}</div>
+  `;
+}
+
+function refreshInboxBadge() {
+  const badge = document.getElementById('scene-inbox-badge');
+  if (!badge) return;
+  const unread = getUnreadCount();
+  if (unread > 0) {
+    badge.hidden = false;
+    badge.textContent = unread > 99 ? '99+' : String(unread);
+  } else {
+    badge.hidden = true;
+  }
+}
+
+function handleInboxChange() {
+  refreshInboxBadge();
+  if (document.body.dataset.scene === 'inbox') {
+    refreshInbox();
+  }
+}
+
+// ── 학계 저널 ──────────────────────────────────────────────────────
+function refreshJournal() {
+  const grid = document.getElementById('journal-grid');
+  if (!grid) return;
+
+  const papers = getJournalPapers();
+  grid.innerHTML = papers.map((p) => {
+    const canon = getCanonForPaper(p);
+    const challengeable = !!(p.challengeable && canon?.challengeable);
+    const cta = challengeable
+      ? `<button class="journal-cta" type="button" data-paper-id="${p.id}">반박 초안 작성</button>`
+      : `<span class="journal-cta journal-cta-disabled" title="${canon ? '현 정설은 반박 대상으로 분류되지 않습니다.' : '관련 정설이 없는 일반 논문입니다.'}">열람만 가능</span>`;
+    return `
+      <article class="journal-card">
+        <div class="journal-card-meta">
+          <span class="journal-card-society">${escapeHtml(p.society)}</span>
+          <span class="journal-card-year">${p.year}년 · 인용 ${p.citations}</span>
+        </div>
+        <h3 class="journal-card-title">${escapeHtml(p.title)}</h3>
+        <div class="journal-card-authors">${escapeHtml(p.authors.join(', '))}</div>
+        <p class="journal-card-abstract">${escapeHtml(p.abstract)}</p>
+        <div class="journal-card-conclusion"><strong>결론</strong> · ${escapeHtml(p.conclusion)}</div>
+        ${canon ? `<div class="journal-card-canon">정설: ${escapeHtml(canon.title)}</div>` : ''}
+        <div class="journal-card-actions">${cta}</div>
+      </article>
+    `;
+  }).join('');
+
+  grid.querySelectorAll('.journal-cta:not(.journal-cta-disabled)').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      handleRebuttalRequest(btn.dataset.paperId);
+    });
+  });
+}
+
+function handleRebuttalRequest(paperId) {
+  const paper = getJournalPapers().find((p) => p.id === paperId);
+  if (!paper) return;
+  const canon = getCanonForPaper(paper);
+  setActiveScene('lab');
+  showToast(
+    `반박 대상: ${canon ? canon.title : paper.title} — 관측을 재현해 도전 논문 요건을 채우세요.`,
+    'mismatch'
+  );
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // ── 이벤트 핸들러 ─────────────────────────────────────────────────

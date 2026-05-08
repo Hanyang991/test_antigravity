@@ -42,34 +42,20 @@ function renderGrammarBlock(analysis) {
   container.innerHTML = rows.join('');
 }
 
-function renderAcademicSummary(gameState, analysis) {
-  const container = document.getElementById('analysis-academic-content');
-  if (!container) return;
-
+function renderAcademicSummary(gameState) {
   const discoveries = Object.keys(gameState.discoveries.bySignature).length;
   const accepted = gameState.papers.accepted.length;
   const mismatches = gameState.academic.canonMismatches?.length || 0;
   const activeExpeditions = gameState.expeditions.active.length;
-  const sentenceGrade = analysis?.sentence?.grade || 'single_rune';
 
-  container.innerHTML = `
-    <div class="analysis-chip-row">
-      <span class="analysis-chip-label">현재 Phase</span>
-      <span class="analysis-chip-value">Phase ${gameState.progression.currentPhase}</span>
-    </div>
-    <div class="analysis-chip-row">
-      <span class="analysis-chip-label">발견/논문</span>
-      <span class="analysis-chip-value">${discoveries}개 발견 · ${accepted}편 수락</span>
-    </div>
-    <div class="analysis-chip-row">
-      <span class="analysis-chip-label">정설 불일치</span>
-      <span class="analysis-chip-value">${mismatches}건</span>
-    </div>
-    <div class="analysis-chip-row">
-      <span class="analysis-chip-label">탐사/문장</span>
-      <span class="analysis-chip-value">${activeExpeditions}건 진행 · ${sentenceGrade}</span>
-    </div>
-  `;
+  const setText = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+  };
+  setText('hud-discoveries', discoveries);
+  setText('hud-papers', accepted);
+  setText('hud-expeditions', activeExpeditions);
+  setText('hud-mismatches', mismatches);
 }
 
 function renderModalPlaceholders() {
