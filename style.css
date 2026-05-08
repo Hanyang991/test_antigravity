@@ -227,6 +227,141 @@ body {
   display: inline-block;
 }
 
+.top-status-bar .hud-spacer {
+  flex: 1 1 auto;
+}
+
+.top-status-bar .hud-phase-chip {
+  border: 1px solid rgba(255, 233, 182, 0.22);
+  border-radius: 999px;
+  padding: 0.05rem 0.55rem;
+  background: rgba(255, 233, 182, 0.05);
+}
+
+.top-status-bar .hud-action {
+  background: rgba(139, 0, 0, 0.45);
+  border: 1px solid rgba(255, 233, 182, 0.45);
+  color: #fff8ec;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 0.18rem 0.75rem;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.top-status-bar .hud-action:hover {
+  background: rgba(170, 30, 30, 0.7);
+  border-color: rgba(255, 240, 200, 0.7);
+}
+
+.top-status-bar .hud-action:active {
+  background: rgba(110, 0, 0, 0.65);
+}
+
+/* Scene navigation (lab / expedition / conference) inside the top bar */
+.scene-nav {
+  display: inline-flex;
+  gap: 0.2rem;
+  align-items: center;
+}
+
+.scene-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 233, 182, 0.18);
+  color: #e8dcc1;
+  padding: 0.2rem 0.7rem;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.scene-btn:hover:not(:disabled) {
+  background: rgba(255, 233, 182, 0.08);
+  border-color: rgba(255, 233, 182, 0.35);
+  color: #fff8ec;
+}
+
+.scene-btn.active {
+  background: rgba(139, 0, 0, 0.55);
+  border-color: rgba(255, 233, 182, 0.45);
+  color: #fff8ec;
+}
+
+.scene-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Full-screen scene containers (other than the lab) */
+.app-scene {
+  position: fixed;
+  top: 2.4rem;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow-y: auto;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(225, 213, 193, 0.85), rgba(207, 192, 167, 0.95) 60%, rgba(178, 161, 132, 0.95)),
+    var(--color-parchment, #e1d5c1);
+  color: #3a2c1a;
+  font-family: var(--font-display, 'Cormorant Garamond', serif);
+  z-index: 50;
+}
+
+.app-scene .scene-frame {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2.25rem 2rem 4rem;
+}
+
+.app-scene .scene-header {
+  text-align: center;
+  margin-bottom: 1.75rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px dashed rgba(58, 44, 26, 0.35);
+}
+
+.app-scene .scene-eyebrow {
+  display: inline-block;
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #6b5e4a;
+  margin-bottom: 0.4rem;
+}
+
+.app-scene .scene-header h1 {
+  font-size: 2rem;
+  letter-spacing: 0.05em;
+  margin: 0 0 0.4rem;
+  color: #2a1f12;
+  font-weight: 600;
+}
+
+.app-scene .scene-header p {
+  font-size: 0.95rem;
+  color: #5a4a36;
+  margin: 0;
+}
+
+/* Override the in-archive expedition list constraints when it lives in the scene */
+#scene-expedition #expedition-panel {
+  display: block !important;
+}
+
+#scene-expedition #expedition-list {
+  max-height: none;
+  padding-right: 0;
+}
+
 /* Top Center: Abyssal Rift Game (Now Professor Assignment) */
 .rift-panel {
   position: absolute;

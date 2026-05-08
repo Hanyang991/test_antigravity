@@ -16,7 +16,7 @@ import { createPaperDraft, getEligiblePaperPlans, getSocieties, submitPaper } fr
 import { getExpeditionSites, startExpedition } from './expedition.js';
 import { applyForGrant, getGrantOffers, getContractOffers, sellScroll, signContract } from './economy.js';
 import { advanceDay } from './schedule.js';
-import { getCurrentPhaseInfo, takeFinalExam, takeMidtermExam } from './phase.js';
+import { getCurrentPhaseInfo } from './phase.js';
 
 // ── 초기화 ────────────────────────────────────────────────────────
 let initialized = false;
@@ -29,6 +29,7 @@ export function initLabNotebook() {
   createToastContainer();
   createNotebookTab();
   createResourceHUD();
+  setupScenes();
 
   // 이벤트 구독
   on('discovery:new', handleNewDiscovery);
@@ -522,31 +523,25 @@ function refreshExpeditionList() {
   `).join('');
 
   list.innerHTML = `
-    <div style="background: rgba(20,20,40,0.55); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:8px 10px; margin-bottom:10px;">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <span style="color:#e6d7ff; font-size:0.82rem; font-weight:600;">${phaseInfo.name}</span>
-        <span style="color:#9a8cbc; font-size:0.68rem;">Phase ${phaseInfo.phase}</span>
+    <div class="scene-meta-card">
+      <div class="scene-meta-row">
+        <span class="scene-meta-title">${phaseInfo.name}</span>
+        <span class="scene-meta-phase">Phase ${phaseInfo.phase}</span>
       </div>
-      <div style="display:flex; gap:6px; margin-top:8px;">
-        <button id="btn-advance-day" style="${buttonStyle('neutral')}">하루 진행</button>
-        <button id="btn-midterm" style="${buttonStyle('neutral')}">중간고사</button>
-        <button id="btn-final" style="${buttonStyle('neutral')}">기말고사</button>
-      </div>
-      <div style="color:#8d8d9a; font-size:0.68rem; margin-top:8px;">
-        다음 조건: ${renderPhaseRequirement(phaseInfo.requirements)}
-      </div>
+      <div class="scene-meta-note">다음 승급 조건 — ${renderPhaseRequirement(phaseInfo.requirements)}</div>
+      <div class="scene-meta-note scene-meta-hint">중간/기말고사는 학기 일정상 8주차·16주차에 지도교수가 자동으로 시행합니다.</div>
     </div>
-    <div style="color:#9de8ff; font-size:0.74rem; font-family:var(--font-data, monospace);">진행 중 탐사</div>
+    <div class="scene-section-label">진행 중 탐사</div>
     ${activeHtml}
-    <div style="color:#9de8ff; font-size:0.74rem; font-family:var(--font-data, monospace); margin-top:10px;">탐사지</div>
+    <div class="scene-section-label">탐사지</div>
     ${sitesHtml || '<div style="color:#666;font-size:0.72rem;padding:6px 0;">현재 해금된 탐사지가 없습니다.</div>'}
-    <div style="color:#ffe4a8; font-size:0.74rem; font-family:var(--font-data, monospace); margin-top:10px;">연구비</div>
+    <div class="scene-section-label scene-section-label-warm">연구비</div>
     ${grantsHtml}
     ${contractsHtml}
     <div style="margin-top:10px;">
       <button id="btn-sell-scroll" style="${buttonStyle('purple')}">현재 현상 스크롤 판매</button>
     </div>
-    <div style="color:#98f6d7; font-size:0.74rem; font-family:var(--font-data, monospace); margin-top:10px;">최근 탐사 결과</div>
+    <div class="scene-section-label scene-section-label-cool">최근 탐사 결과</div>
     ${completedHtml || '<div style="color:#666;font-size:0.72rem;padding:6px 0;">아직 탐사 완료 기록이 없습니다.</div>'}
   `;
 
@@ -575,22 +570,6 @@ function refreshExpeditionList() {
     });
   });
 
-  const advanceDayBtn = document.getElementById('btn-advance-day');
-  if (advanceDayBtn) {
-    advanceDayBtn.addEventListener('click', () => {
-      advanceDay(1);
-      refreshExpeditionList();
-      refreshResourceHUD();
-    });
-  }
-  const midtermBtn = document.getElementById('btn-midterm');
-  if (midtermBtn) {
-    midtermBtn.addEventListener('click', () => takeMidtermExam());
-  }
-  const finalBtn = document.getElementById('btn-final');
-  if (finalBtn) {
-    finalBtn.addEventListener('click', () => takeFinalExam());
-  }
   const sellScrollBtn = document.getElementById('btn-sell-scroll');
   if (sellScrollBtn) {
     sellScrollBtn.addEventListener('click', () => {
@@ -697,7 +676,14 @@ function createResourceHUD() {
   hud.id = 'resource-hud';
   hud.className = 'top-status-bar';
 
+  const phaseInfo = getCurrentPhaseInfo();
   hud.innerHTML = `
+    <nav class="scene-nav" aria-label="현재 위치">
+      <button class="scene-btn active" type="button" data-scene="lab">🜂 연구실</button>
+      <button class="scene-btn" type="button" data-scene="expedition">🧭 답사</button>
+      <button class="scene-btn" type="button" data-scene="conference" disabled title="학회 — 준비 중">🎓 학회</button>
+    </nav>
+    <span class="hud-divider" aria-hidden="true"></span>
     <span class="hud-chip" title="연구비">💰 <span id="hud-funds">${gameState.resources.researchFunds}</span>G</span>
     <span class="hud-chip" title="명성">⭐ <span id="hud-rep">${gameState.resources.reputation}</span></span>
     <span class="hud-chip" title="학위 점수">🎓 <span id="hud-degree">${gameState.resources.degreeScore}</span></span>
@@ -706,10 +692,19 @@ function createResourceHUD() {
     <span class="hud-chip" title="수락된 논문">📜 논문 <span id="hud-papers">0</span></span>
     <span class="hud-chip" title="진행 중인 답사">🧭 답사 <span id="hud-expeditions">0</span></span>
     <span class="hud-chip" title="정설 불일치">⚠ 불일치 <span id="hud-mismatches">0</span></span>
-    <span class="hud-divider" aria-hidden="true"></span>
-    <span class="hud-chip" title="현재 일정">📅 <span id="hud-week">${gameState.progression.currentWeek}</span>주 <span id="hud-day">${gameState.progression.currentDay}</span>일</span>
-    <span class="hud-chip" title="현재 Phase">🜁 Phase <span id="hud-phase">${gameState.progression.currentPhase}</span></span>
+    <span class="hud-spacer" aria-hidden="true"></span>
+    <span class="hud-chip hud-phase-chip" title="학적 / 학기">🎓 <span id="hud-phase-name">${phaseInfo.name}</span> · <span id="hud-week">${gameState.progression.currentWeek}</span>주 <span id="hud-day">${gameState.progression.currentDay}</span>일</span>
+    <button id="btn-next-day" class="hud-action" type="button" title="하루 진행">다음 날 ▶</button>
   `;
+
+  const nextDayBtn = hud.querySelector('#btn-next-day');
+  if (nextDayBtn) {
+    nextDayBtn.addEventListener('click', () => {
+      advanceDay(1);
+      refreshResourceHUD();
+      refreshExpeditionList();
+    });
+  }
 
   document.body.appendChild(hud);
 }
@@ -721,7 +716,87 @@ export function refreshResourceHUD() {
   setText('hud-degree', gameState.resources.degreeScore);
   setText('hud-week', gameState.progression.currentWeek);
   setText('hud-day', gameState.progression.currentDay);
-  setText('hud-phase', gameState.progression.currentPhase);
+  setText('hud-phase-name', getCurrentPhaseInfo().name);
+}
+
+// ── 씬 시스템 (연구실 / 답사 / 학회) ──────────────────────────────
+const LAB_SCENE_IDS = ['rift-container', 'magic-canvas', 'ui-layer'];
+
+function setupScenes() {
+  // 답사 씬 컨테이너 생성
+  const expeditionScene = document.createElement('div');
+  expeditionScene.id = 'scene-expedition';
+  expeditionScene.className = 'app-scene';
+  expeditionScene.dataset.scene = 'expedition';
+  expeditionScene.innerHTML = `
+    <div class="scene-frame">
+      <header class="scene-header">
+        <span class="scene-eyebrow">현장 조사</span>
+        <h1>답사</h1>
+        <p>학과 외부의 현장을 직접 답사하여 자료와 발견을 수집합니다.</p>
+      </header>
+      <div class="scene-body" id="scene-expedition-body"></div>
+    </div>
+  `;
+  document.body.appendChild(expeditionScene);
+
+  // archive 패널의 expedition-panel 을 답사 씬으로 이동
+  const expPanel = document.getElementById('expedition-panel');
+  const sceneBody = expeditionScene.querySelector('#scene-expedition-body');
+  if (expPanel && sceneBody) {
+    expPanel.style.display = '';
+    sceneBody.appendChild(expPanel);
+  }
+
+  // archive 의 탐사 탭 버튼 숨김 (답사는 이제 별도 씬)
+  const expTab = document.querySelector('.archive-tab[data-tab="expedition"]');
+  if (expTab) expTab.style.display = 'none';
+
+  // 학회 씬 자리표시자
+  const conferenceScene = document.createElement('div');
+  conferenceScene.id = 'scene-conference';
+  conferenceScene.className = 'app-scene';
+  conferenceScene.dataset.scene = 'conference';
+  conferenceScene.innerHTML = `
+    <div class="scene-frame">
+      <header class="scene-header">
+        <span class="scene-eyebrow">학술 활동</span>
+        <h1>학회</h1>
+        <p>아직 준비 중입니다. 학회 발표·세미나·외부 평가는 추후 추가됩니다.</p>
+      </header>
+    </div>
+  `;
+  document.body.appendChild(conferenceScene);
+
+  // 씬 전환 버튼 클릭 처리
+  document.querySelectorAll('.scene-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.scene;
+      if (!target || btn.disabled) return;
+      setActiveScene(target);
+    });
+  });
+
+  setActiveScene('lab');
+}
+
+function setActiveScene(name) {
+  document.body.dataset.scene = name;
+
+  LAB_SCENE_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = name === 'lab' ? '' : 'none';
+  });
+
+  document.querySelectorAll('.app-scene').forEach((scene) => {
+    scene.style.display = scene.dataset.scene === name ? '' : 'none';
+  });
+
+  document.querySelectorAll('.scene-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.scene === name);
+  });
+
+  if (name === 'expedition') refreshExpeditionList();
 }
 
 // ── 이벤트 핸들러 ─────────────────────────────────────────────────
