@@ -9,6 +9,7 @@ import { recordDiscovery } from './discoverySystem.js'
 import { initLabNotebook, showToast } from './labNotebook.js'
 import { initAcademicCanon } from './academicCanon.js'
 import { renderAcademicUI } from './academicUI.js'
+import { initInbox } from './inboxSystem.js'
 import { playCast, playDrawStart, playRiftControl, playStrokeCommit, primeAudio } from './sound.js'
 
 const { bboxOfStrokes, clusterStrokesByProximity } = RECOGNITION_INTERNAL;
@@ -394,6 +395,7 @@ function init() {
   // ── Game systems init (M1 + M6) ──────────────────────────────────
   loadGame();
   initAcademicCanon();
+  initInbox();
   initLabNotebook();
   renderAcademicUI(gameState, lastAnalysis);
   startAutosave();

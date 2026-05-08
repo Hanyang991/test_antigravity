@@ -362,6 +362,263 @@ body {
   padding-right: 0;
 }
 
+/* ── Inbox scene ─────────────────────────────────────────────── */
+.scene-btn-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.05rem;
+  height: 1.05rem;
+  padding: 0 0.3rem;
+  margin-left: 0.35rem;
+  border-radius: 999px;
+  background: #b8002a;
+  color: #fff8ec;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.scene-btn-badge[hidden] {
+  display: none;
+}
+
+.inbox-frame {
+  max-width: 1080px;
+}
+
+.inbox-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) 1fr;
+  gap: 1.25rem;
+  align-items: stretch;
+}
+
+.inbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.inbox-item {
+  --inbox-accent: #3a2c1a;
+  text-align: left;
+  background: rgba(255, 247, 230, 0.6);
+  border: 1px solid rgba(58, 44, 26, 0.18);
+  border-left: 3px solid var(--inbox-accent);
+  padding: 0.55rem 0.7rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  color: #3a2c1a;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.inbox-item:hover {
+  background: rgba(255, 247, 230, 0.95);
+  border-color: rgba(58, 44, 26, 0.4);
+}
+
+.inbox-item-active {
+  background: rgba(255, 230, 180, 0.95) !important;
+  border-color: var(--inbox-accent) !important;
+}
+
+.inbox-item-unread .inbox-item-subject::before {
+  content: '● ';
+  color: #b8002a;
+  font-size: 0.7em;
+  vertical-align: middle;
+}
+
+.inbox-item-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: #6b5e4a;
+  letter-spacing: 0.02em;
+}
+
+.inbox-item-sender {
+  font-weight: 600;
+  color: var(--inbox-accent);
+}
+
+.inbox-item-subject {
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: #2a1f12;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-empty {
+  padding: 1rem;
+  text-align: center;
+  color: #6b5e4a;
+  font-size: 0.85rem;
+}
+
+.inbox-detail {
+  background: rgba(255, 247, 230, 0.85);
+  border: 1px solid rgba(58, 44, 26, 0.2);
+  border-radius: 3px;
+  padding: 1.25rem 1.4rem;
+  min-height: 40vh;
+  color: #3a2c1a;
+}
+
+.inbox-detail-empty {
+  color: #6b5e4a;
+  font-size: 0.9rem;
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.inbox-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 1px dashed rgba(58, 44, 26, 0.25);
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.78rem;
+}
+
+.inbox-detail-sender {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.inbox-detail-when {
+  color: #6b5e4a;
+}
+
+.inbox-detail-subject {
+  font-size: 1.35rem;
+  margin: 0 0 1rem;
+  letter-spacing: 0.02em;
+  color: #2a1f12;
+  font-weight: 600;
+}
+
+.inbox-detail-body {
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: #3a2c1a;
+}
+
+/* ── Journal scene ───────────────────────────────────────────── */
+.journal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
+.journal-card {
+  background: rgba(255, 247, 230, 0.85);
+  border: 1px solid rgba(58, 44, 26, 0.22);
+  border-radius: 3px;
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  color: #3a2c1a;
+}
+
+.journal-card-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: #6b5e4a;
+  letter-spacing: 0.02em;
+}
+
+.journal-card-society {
+  font-weight: 700;
+  color: #4a3a25;
+}
+
+.journal-card-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #2a1f12;
+  line-height: 1.35;
+}
+
+.journal-card-authors {
+  font-size: 0.78rem;
+  color: #5a4a36;
+  font-style: italic;
+}
+
+.journal-card-abstract {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: #3a2c1a;
+}
+
+.journal-card-conclusion {
+  font-size: 0.78rem;
+  color: #4a3a25;
+  border-top: 1px dashed rgba(58, 44, 26, 0.2);
+  padding-top: 0.45rem;
+}
+
+.journal-card-canon {
+  font-size: 0.74rem;
+  color: #6b5e4a;
+  letter-spacing: 0.02em;
+}
+
+.journal-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.25rem;
+}
+
+.journal-cta {
+  background: rgba(139, 0, 0, 0.85);
+  border: 1px solid rgba(139, 0, 0, 0.95);
+  color: #fff8ec;
+  font-family: inherit;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 3px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.journal-cta:hover {
+  background: rgba(170, 30, 30, 0.95);
+}
+
+.journal-cta-disabled {
+  background: transparent;
+  color: #8a7a64;
+  border-color: rgba(58, 44, 26, 0.25);
+  cursor: default;
+}
+
+@media (max-width: 720px) {
+  .inbox-layout {
+    grid-template-columns: 1fr;
+  }
+  .inbox-list {
+    max-height: none;
+  }
+}
+
 /* Top Center: Abyssal Rift Game (Now Professor Assignment) */
 .rift-panel {
   position: absolute;

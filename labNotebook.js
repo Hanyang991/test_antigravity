@@ -17,6 +17,9 @@ import { getExpeditionSites, startExpedition } from './expedition.js';
 import { applyForGrant, getGrantOffers, getContractOffers, sellScroll, signContract } from './economy.js';
 import { advanceDay } from './schedule.js';
 import { getCurrentPhaseInfo } from './phase.js';
+import { getMessages, getUnreadCount, markRead } from './inboxSystem.js';
+import { getJournalPapers, getCanonForPaper } from './journalSystem.js';
+import { SENDER_ROLES } from './data/inboxSeed.js';
 
 // ── 초기화 ────────────────────────────────────────────────────────
 let initialized = false;
@@ -51,9 +54,12 @@ export function initLabNotebook() {
   on('phase:advanced', handlePhaseAdvanced);
   on('exam:midtermTaken', handleMidtermTaken);
   on('exam:finalTaken', handleFinalTaken);
+  on('inbox:received', handleInboxChange);
+  on('inbox:read', handleInboxChange);
 
   updateNotebookBadge();
   updatePaperBadge();
+  refreshInboxBadge();
 }
 
 // ── 토스트 시스템 ─────────────────────────────────────────────────
@@ -681,7 +687,8 @@ function createResourceHUD() {
     <nav class="scene-nav" aria-label="현재 위치">
       <button class="scene-btn active" type="button" data-scene="lab">🜂 연구실</button>
       <button class="scene-btn" type="button" data-scene="expedition">🧭 답사</button>
-      <button class="scene-btn" type="button" data-scene="conference" disabled title="학회 — 준비 중">🎓 학회</button>
+      <button class="scene-btn" type="button" data-scene="inbox">📬 메일<span class="scene-btn-badge" id="scene-inbox-badge" hidden>0</span></button>
+      <button class="scene-btn" type="button" data-scene="journal">📰 학계</button>
     </nav>
     <span class="hud-divider" aria-hidden="true"></span>
     <span class="hud-chip" title="연구비">💰 <span id="hud-funds">${gameState.resources.researchFunds}</span>G</span>
@@ -752,21 +759,44 @@ function setupScenes() {
   const expTab = document.querySelector('.archive-tab[data-tab="expedition"]');
   if (expTab) expTab.style.display = 'none';
 
-  // 학회 씬 자리표시자
-  const conferenceScene = document.createElement('div');
-  conferenceScene.id = 'scene-conference';
-  conferenceScene.className = 'app-scene';
-  conferenceScene.dataset.scene = 'conference';
-  conferenceScene.innerHTML = `
-    <div class="scene-frame">
+  // 메일함 씬
+  const inboxScene = document.createElement('div');
+  inboxScene.id = 'scene-inbox';
+  inboxScene.className = 'app-scene';
+  inboxScene.dataset.scene = 'inbox';
+  inboxScene.innerHTML = `
+    <div class="scene-frame inbox-frame">
       <header class="scene-header">
-        <span class="scene-eyebrow">학술 활동</span>
-        <h1>학회</h1>
-        <p>아직 준비 중입니다. 학회 발표·세미나·외부 평가는 추후 추가됩니다.</p>
+        <span class="scene-eyebrow">학내 통신</span>
+        <h1>메일함</h1>
+        <p>학과 사무실·지도교수·학회·후원 기관에서 발신한 공식 통신을 확인합니다.</p>
       </header>
+      <div class="inbox-layout">
+        <div class="inbox-list" id="inbox-list" aria-label="메일 목록"></div>
+        <div class="inbox-detail" id="inbox-detail" aria-live="polite">
+          <div class="inbox-detail-empty">왼쪽에서 메일을 선택하세요.</div>
+        </div>
+      </div>
     </div>
   `;
-  document.body.appendChild(conferenceScene);
+  document.body.appendChild(inboxScene);
+
+  // 학계(저널) 씬
+  const journalScene = document.createElement('div');
+  journalScene.id = 'scene-journal';
+  journalScene.className = 'app-scene';
+  journalScene.dataset.scene = 'journal';
+  journalScene.innerHTML = `
+    <div class="scene-frame">
+      <header class="scene-header">
+        <span class="scene-eyebrow">학술 정기간행물</span>
+        <h1>학계 저널</h1>
+        <p>다른 학파·연구실이 발표한 논문을 열람합니다. 정설과 충돌하는 관측이 있다면 도전 논문 작성을 검토하세요.</p>
+      </header>
+      <div class="journal-grid" id="journal-grid"></div>
+    </div>
+  `;
+  document.body.appendChild(journalScene);
 
   // 씬 전환 버튼 클릭 처리
   document.querySelectorAll('.scene-btn').forEach((btn) => {
@@ -797,6 +827,154 @@ function setActiveScene(name) {
   });
 
   if (name === 'expedition') refreshExpeditionList();
+  if (name === 'inbox') refreshInbox();
+  if (name === 'journal') refreshJournal();
+}
+
+// ── 메일함 ────────────────────────────────────────────────────────
+let selectedMailId = null;
+
+function refreshInbox() {
+  const listEl = document.getElementById('inbox-list');
+  const detailEl = document.getElementById('inbox-detail');
+  if (!listEl || !detailEl) return;
+
+  const messages = getMessages();
+  if (messages.length === 0) {
+    listEl.innerHTML = '<div class="inbox-empty">받은 메일이 없습니다.</div>';
+    detailEl.innerHTML = '<div class="inbox-detail-empty">받은 메일이 없습니다.</div>';
+    return;
+  }
+
+  listEl.innerHTML = messages.map((m) => {
+    const role = SENDER_ROLES[m.senderRole] || SENDER_ROLES.system;
+    return `
+      <button type="button" class="inbox-item${m.read ? '' : ' inbox-item-unread'}${selectedMailId === m.id ? ' inbox-item-active' : ''}"
+              data-mail-id="${m.id}" style="--inbox-accent:${role.accent};">
+        <span class="inbox-item-meta">
+          <span class="inbox-item-sender">${escapeHtml(m.sender)}</span>
+          <span class="inbox-item-when">${m.receivedWeek}주 ${m.receivedDay}일</span>
+        </span>
+        <span class="inbox-item-subject">${escapeHtml(m.subject)}</span>
+      </button>
+    `;
+  }).join('');
+
+  listEl.querySelectorAll('.inbox-item').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.mailId;
+      selectMail(id);
+    });
+  });
+
+  if (!selectedMailId || !messages.find((m) => m.id === selectedMailId)) {
+    selectMail(messages[0].id);
+  } else {
+    renderMailDetail(messages.find((m) => m.id === selectedMailId));
+  }
+}
+
+function selectMail(id) {
+  selectedMailId = id;
+  const mail = getMessages().find((m) => m.id === id);
+  if (!mail) return;
+  if (!mail.read) {
+    markRead(id);
+  }
+  renderMailDetail(mail);
+  document.querySelectorAll('#inbox-list .inbox-item').forEach((btn) => {
+    btn.classList.toggle('inbox-item-active', btn.dataset.mailId === id);
+    if (btn.dataset.mailId === id) btn.classList.remove('inbox-item-unread');
+  });
+}
+
+function renderMailDetail(mail) {
+  const detailEl = document.getElementById('inbox-detail');
+  if (!detailEl || !mail) return;
+  const role = SENDER_ROLES[mail.senderRole] || SENDER_ROLES.system;
+  detailEl.innerHTML = `
+    <div class="inbox-detail-header">
+      <div class="inbox-detail-sender" style="color:${role.accent};">${escapeHtml(mail.sender)}</div>
+      <div class="inbox-detail-when">${mail.receivedWeek}주 ${mail.receivedDay}일 수신</div>
+    </div>
+    <h2 class="inbox-detail-subject">${escapeHtml(mail.subject)}</h2>
+    <div class="inbox-detail-body">${escapeHtml(mail.body).replace(/\n/g, '<br>')}</div>
+  `;
+}
+
+function refreshInboxBadge() {
+  const badge = document.getElementById('scene-inbox-badge');
+  if (!badge) return;
+  const unread = getUnreadCount();
+  if (unread > 0) {
+    badge.hidden = false;
+    badge.textContent = unread > 99 ? '99+' : String(unread);
+  } else {
+    badge.hidden = true;
+  }
+}
+
+function handleInboxChange() {
+  refreshInboxBadge();
+  if (document.body.dataset.scene === 'inbox') {
+    refreshInbox();
+  }
+}
+
+// ── 학계 저널 ──────────────────────────────────────────────────────
+function refreshJournal() {
+  const grid = document.getElementById('journal-grid');
+  if (!grid) return;
+
+  const papers = getJournalPapers();
+  grid.innerHTML = papers.map((p) => {
+    const canon = getCanonForPaper(p);
+    const challengeable = !!(p.challengeable && canon?.challengeable);
+    const cta = challengeable
+      ? `<button class="journal-cta" type="button" data-paper-id="${p.id}">반박 초안 작성</button>`
+      : `<span class="journal-cta journal-cta-disabled" title="${canon ? '현 정설은 반박 대상으로 분류되지 않습니다.' : '관련 정설이 없는 일반 논문입니다.'}">열람만 가능</span>`;
+    return `
+      <article class="journal-card">
+        <div class="journal-card-meta">
+          <span class="journal-card-society">${escapeHtml(p.society)}</span>
+          <span class="journal-card-year">${p.year}년 · 인용 ${p.citations}</span>
+        </div>
+        <h3 class="journal-card-title">${escapeHtml(p.title)}</h3>
+        <div class="journal-card-authors">${escapeHtml(p.authors.join(', '))}</div>
+        <p class="journal-card-abstract">${escapeHtml(p.abstract)}</p>
+        <div class="journal-card-conclusion"><strong>결론</strong> · ${escapeHtml(p.conclusion)}</div>
+        ${canon ? `<div class="journal-card-canon">정설: ${escapeHtml(canon.title)}</div>` : ''}
+        <div class="journal-card-actions">${cta}</div>
+      </article>
+    `;
+  }).join('');
+
+  grid.querySelectorAll('.journal-cta:not(.journal-cta-disabled)').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      handleRebuttalRequest(btn.dataset.paperId);
+    });
+  });
+}
+
+function handleRebuttalRequest(paperId) {
+  const paper = getJournalPapers().find((p) => p.id === paperId);
+  if (!paper) return;
+  const canon = getCanonForPaper(paper);
+  setActiveScene('lab');
+  showToast(
+    `반박 대상: ${canon ? canon.title : paper.title} — 관측을 재현해 도전 논문 요건을 채우세요.`,
+    'mismatch'
+  );
+}
+
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // ── 이벤트 핸들러 ─────────────────────────────────────────────────
