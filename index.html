@@ -51,15 +51,15 @@
           <div class="panel-header">
             <h2>고문헌 보관소</h2>
             <div class="panel-header-actions">
-              <div class="archive-nav">
-                <button id="btn-prev-doc">&lt;</button>
-                <span class="status-badge" id="archive-badge">문서 #01</span>
-                <button id="btn-next-doc">&gt;</button>
-              </div>
               <button class="panel-toggle" type="button" data-panel-toggle aria-expanded="true" aria-label="고문헌 보관소 접기">▾</button>
             </div>
           </div>
           <div class="panel-content">
+            <div class="archive-nav" id="archive-doc-nav">
+              <button id="btn-prev-doc" aria-label="이전 문서">&lt;</button>
+              <span class="status-badge" id="archive-badge">문서 #01</span>
+              <button id="btn-next-doc" aria-label="다음 문서">&gt;</button>
+            </div>
             <p class="lore-text" id="archive-text">"기초는 완벽한 균형에서 시작된다. 세 개의 꼭짓점이 서로를 바라볼 때, 불꽃의 형태가 태동한다."</p>
             <div class="sketch-box" id="archive-sketch">
               <!-- Dynamically injected SVG -->
