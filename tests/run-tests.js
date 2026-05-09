@@ -21,7 +21,8 @@ const { recordDiscovery, getDiscovery } = await import('../discoverySystem.js');
 const { createPaperDraft, getPaperSuggestion, submitPaper } = await import('../paperSystem.js');
 const { applyForGrant, signContract, sellScroll, tickEconomyWeek } = await import('../economy.js');
 const { startExpedition } = await import('../expedition.js');
-const { advanceDay } = await import('../schedule.js');
+const { advanceDay, enqueueEvent, getPendingEvents, consumeTime } = await import('../schedule.js');
+const { on: onBus, off: offBus } = await import('../eventBus.js');
 const { checkPhaseProgress, takeMidtermExam, takeFinalExam } = await import('../phase.js');
 const { analyzeConnectorLines } = await import('../connectorLine.js');
 const { analyzeGrammarTokens } = await import('../grammarTokens.js');
@@ -327,6 +328,67 @@ const tests = [
 
     const weeklyIncome = tickEconomyWeek();
     assert.equal(weeklyIncome, 90);
+  }],
+
+  ['schedule event queue dispatches due events on advanceDay (M8)', () => {
+    resetAll();
+    const startWeek = gameState.progression.currentWeek;
+    const startDay = gameState.progression.currentDay;
+
+    const fired = [];
+    const handler = (e) => fired.push(e);
+    onBus('paper:review_due', handler);
+
+    enqueueEvent({ delayDays: 3, type: 'paper:review_due', payload: { paperId: 'p_42' }, label: 'review' });
+    enqueueEvent({ delayDays: 5, type: 'paper:review_due', payload: { paperId: 'p_99' }, label: 'review' });
+
+    assert.equal(getPendingEvents().length, 2);
+
+    const r1 = advanceDay(2);
+    assert.equal(r1.firedEvents.length, 0, 'no event should fire before delay');
+    assert.equal(fired.length, 0);
+    assert.equal(getPendingEvents().length, 2);
+
+    const r2 = advanceDay(2);
+    assert.equal(r2.firedEvents.length, 1, 'first event should fire on day 4 (delay=3 from start day+1)');
+    assert.equal(fired.length, 1);
+    assert.equal(fired[0].payload.paperId, 'p_42');
+    assert.equal(getPendingEvents().length, 1);
+
+    const r3 = advanceDay(3);
+    assert.equal(r3.firedEvents.length, 1);
+    assert.equal(fired.length, 2);
+    assert.equal(fired[1].payload.paperId, 'p_99');
+    assert.equal(getPendingEvents().length, 0);
+
+    // 같은 이벤트가 중복 발사되지 않아야 함
+    advanceDay(5);
+    assert.equal(fired.length, 2, 'fired events must not refire on subsequent advanceDay');
+
+    // 시간이 흘렀음을 확인
+    assert.ok(gameState.progression.currentWeek > startWeek
+      || gameState.progression.currentDay > startDay,
+      'time must have progressed');
+
+    offBus('paper:review_due', handler);
+  }],
+
+  ['consumeTime auto-progresses time and dispatches events between (M8)', () => {
+    resetAll();
+    const fired = [];
+    const handler = (e) => fired.push(e.payload?.tag);
+    onBus('lecture:scheduled', handler);
+
+    enqueueEvent({ delayDays: 1, type: 'lecture:scheduled', payload: { tag: 'A' } });
+    enqueueEvent({ delayDays: 4, type: 'lecture:scheduled', payload: { tag: 'B' } });
+
+    const result = consumeTime(5, { source: 'expedition_test' });
+    assert.equal(fired.length, 2, `expected both events to fire, got ${JSON.stringify(fired)}`);
+    assert.deepEqual(fired, ['A', 'B'], 'events must fire in chronological order');
+    assert.ok(Array.isArray(result.firedEvents));
+    assert.equal(result.firedEvents.length, 2);
+
+    offBus('lecture:scheduled', handler);
   }],
 
   ['expeditions complete through schedule progression and unlock materials', () => {
