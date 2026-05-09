@@ -24,7 +24,8 @@ const { startExpedition } = await import('../expedition.js');
 const { advanceDay, enqueueEvent, getPendingEvents, consumeTime } = await import('../schedule.js');
 const { on: onBus, off: offBus } = await import('../eventBus.js');
 const { checkPhaseProgress, takeMidtermExam, takeFinalExam } = await import('../phase.js');
-const { getCanonEntries } = await import('../academicCanon.js');
+const { getCanonEntries, classifyDiscoveryAgainstCanon, getCanonMatchForSignature, inspectCanonMismatch } = await import('../academicCanon.js');
+const { reviewPaper, getEligiblePaperPlans } = await import('../paperSystem.js');
 const { ACTION_COSTS, consumeForAction } = await import('../actionCosts.js');
 const { analyzeConnectorLines } = await import('../connectorLine.js');
 const { analyzeGrammarTokens } = await import('../grammarTokens.js');
@@ -52,6 +53,8 @@ function resetAll() {
   gameState.economy.scrollOrders = [];
   gameState.economy.weeklyIncome = [];
   gameState.academic.canonMismatches = [];
+  gameState.academic.canonMatches = {};
+  gameState.academic.canonOverrides = {};
 }
 
 function makeAnalysis(overrides = {}) {
@@ -1029,6 +1032,275 @@ const tests = [
     assert.equal(gameState.progression.currentPhase, 4);
     assert.notEqual(gameState.progression.canRegisterCanon, true,
       'canRegisterCanon must remain false until Phase 5 promotion');
+  }],
+
+  ['classifyDiscoveryAgainstCanon returns unknown when no canon hint matches (M7 PR-F)', () => {
+    resetAll();
+    const result = classifyDiscoveryAgainstCanon('sig_no_canon_match');
+    assert.equal(result.classification, 'unknown');
+    assert.equal(result.canon, null);
+    assert.equal(getCanonMatchForSignature('sig_no_canon_match'), null);
+  }],
+
+  ['classifyDiscoveryAgainstCanon returns known_correct when canon.isCorrect=true and observables match (M7 PR-F)', () => {
+    resetAll();
+    // canon_002 (기초 결계 정설, isCorrect=true) 와 일치하는 분석 시뮬레이션
+    const sig = 'sig_known_correct';
+    gameState.academic.canonMatches[sig] = {
+      canonId: 'canon_002',
+      observed: 'consistent',
+      recordedAt: Date.now(),
+    };
+
+    const result = classifyDiscoveryAgainstCanon(sig);
+    assert.equal(result.classification, 'known_correct');
+    assert.ok(result.canon, 'canon must be returned');
+    assert.equal(result.canon.id, 'canon_002');
+    assert.equal(result.canon.isCorrect, true);
+    assert.ok(result.reason.includes(result.canon.title));
+  }],
+
+  ['classifyDiscoveryAgainstCanon returns known_disputed when canon.isCorrect=false (M7 PR-F)', () => {
+    resetAll();
+    // canon_001 (봉인된 달, isCorrect=false) 매칭. observables 일치 여부와 무관하게 disputed.
+    const sig = 'sig_known_disputed_wrong';
+    gameState.academic.canonMatches[sig] = {
+      canonId: 'canon_001',
+      observed: 'consistent',
+      recordedAt: Date.now(),
+    };
+
+    const result = classifyDiscoveryAgainstCanon(sig);
+    assert.equal(result.classification, 'known_disputed');
+    assert.equal(result.canon.id, 'canon_001');
+    assert.equal(result.canon.isCorrect, false);
+  }],
+
+  ['classifyDiscoveryAgainstCanon returns known_disputed when observables conflict with correct canon (M7 PR-F)', () => {
+    resetAll();
+    const sig = 'sig_known_disputed_observed';
+    // canon_002 (isCorrect=true) 매칭이지만 mismatch 도 등록된 경우 → disputed.
+    gameState.academic.canonMatches[sig] = {
+      canonId: 'canon_002',
+      observed: 'inconsistent',
+      recordedAt: Date.now(),
+    };
+    gameState.academic.canonMismatches.push({
+      id: `mismatch_canon_002_${sig}`,
+      canonId: 'canon_002',
+      canonTitle: '기초 결계 정설',
+      signature: sig,
+      reasons: ['observable conflict'],
+      createdAt: Date.now(),
+    });
+
+    const result = classifyDiscoveryAgainstCanon(sig);
+    assert.equal(result.classification, 'known_disputed');
+    assert.equal(result.canon.id, 'canon_002');
+  }],
+
+  ['reviewPaper hard-rejects new_discovery on known_correct canon (M7 PR-F)', () => {
+    resetAll();
+    const sig = 'sig_pr_f_known_correct';
+    const analysis = makeAnalysis({ signature: sig, instability: 18, grade: 'single_rune' });
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+
+    // canon_002 매칭 (정설로 등재된 현상)
+    gameState.academic.canonMatches[sig] = {
+      canonId: 'canon_002',
+      observed: 'consistent',
+      recordedAt: Date.now(),
+    };
+
+    const draft = createPaperDraft({
+      discoverySignature: sig,
+      type: 'new_discovery',
+      targetSociety: 'basic_magic_society',
+    });
+    submitPaper(draft.id);
+    const review = runDuePaperReview(draft.id);
+
+    assert.ok(review, 'review must be produced');
+    assert.equal(review.accepted, false, 'known_correct + new_discovery must hard-reject');
+    assert.equal(review.disputed, false);
+    assert.equal(review.score, 0);
+    assert.equal(review.classification.classification, 'known_correct');
+    assert.ok(
+      review.reasons.some((r) => r.includes('정설') && r.includes('등재')),
+      `expected canon-rejection reason, got ${JSON.stringify(review.reasons)}`,
+    );
+    assert.equal(gameState.papers.rejected.length, 1);
+    assert.equal(gameState.papers.accepted.length, 0);
+    // 보상이 들어가지 않아야 함
+    assert.equal(gameState.resources.degreeScore, 0);
+  }],
+
+  ['reviewPaper accepts new_discovery on known_disputed canon with score+reward penalty (M7 PR-F option B)', () => {
+    resetAll();
+    const sig = 'sig_pr_f_known_disputed';
+    const analysis = makeAnalysis({ signature: sig, instability: 18, grade: 'single_rune' });
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+
+    // canon_001 매칭 (isCorrect=false, challengeable=true)
+    gameState.academic.canonMatches[sig] = {
+      canonId: 'canon_001',
+      observed: 'consistent',
+      recordedAt: Date.now(),
+    };
+
+    // 비교군: 페널티 없는 상태에서 같은 paper 가 받았을 base 점수/보상
+    const baselineDraft = createPaperDraft({
+      discoverySignature: sig,
+      type: 'new_discovery',
+      targetSociety: 'basic_magic_society',
+    });
+    // 비교만 위해 직접 reviewPaper 를 임시로 호출 (canonMatches 가 잡고 있어 이미 페널티 반영됨)
+    const draftReview = reviewPaper({
+      ...baselineDraft,
+      discoverySignature: sig,
+      evidence: baselineDraft.evidence,
+    });
+    // 위 시뮬레이션 review 는 finalize 안 했으므로 gameState 영향 없음 — draft 도 정리
+    gameState.papers.drafts = gameState.papers.drafts.filter((p) => p.id !== baselineDraft.id);
+
+    assert.equal(draftReview.classification.classification, 'known_disputed');
+    assert.equal(draftReview.canonPenaltyApplied, true);
+    assert.ok(
+      draftReview.reasons.some((r) => r.includes('미세 기여') || r.includes('차감')),
+      `expected penalty reason, got ${JSON.stringify(draftReview.reasons)}`,
+    );
+
+    // 실제 흐름: submitPaper → runDuePaperReview
+    const draft = createPaperDraft({
+      discoverySignature: sig,
+      type: 'new_discovery',
+      targetSociety: 'basic_magic_society',
+    });
+    submitPaper(draft.id);
+    const review = runDuePaperReview(draft.id);
+
+    assert.ok(review);
+    assert.equal(review.classification.classification, 'known_disputed');
+    assert.equal(review.canonPenaltyApplied, true);
+
+    // multiplier=0.7 → 잘 쓴 disputed paper 는 basic 학회 (acceptThreshold=60) 통과 가능.
+    // 위 reproduction 3회 + single_rune + instability=18 + new_discovery 조합의
+    // raw score 는 90 (=25+25+25+15). 0.7 곱 → 63 으로 60 통과.
+    assert.equal(review.accepted, true,
+      `disputed paper with raw=90 must pass basic acceptThreshold=60 after 0.7 multiplier (got score=${review.score})`);
+    assert.ok(review.score >= 60 && review.score < 90,
+      `disputed score must be reduced from raw 90 but >= 60, got ${review.score}`);
+
+    // basic_magic_society base rewards: degreeScore=15, reputation=8, researchFunds=300.
+    // multiplier=0.7 → round(15*0.7)=11 / round(8*0.7)=6 / round(300*0.7)=210.
+    assert.ok(review.grantedRewards, 'grantedRewards must be present on accepted disputed paper');
+    assert.ok(
+      review.grantedRewards.degreeScore < 15,
+      `degreeScore reward must be reduced (<15), got ${review.grantedRewards.degreeScore}`,
+    );
+    assert.ok(
+      review.grantedRewards.researchFunds < 300,
+      `researchFunds reward must be reduced (<300), got ${review.grantedRewards.researchFunds}`,
+    );
+    assert.equal(gameState.resources.degreeScore, review.grantedRewards.degreeScore);
+    assert.equal(gameState.resources.researchFunds, 500 + review.grantedRewards.researchFunds);
+  }],
+
+  ['reviewPaper accepts new_discovery on unknown signature with full rewards (M7 PR-F)', () => {
+    resetAll();
+    const sig = 'sig_pr_f_unknown';
+    const analysis = makeAnalysis({ signature: sig, instability: 18, grade: 'single_rune' });
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+
+    // canonMatches 가 비어있는 상태 → unknown
+    assert.equal(getCanonMatchForSignature(sig), null);
+
+    const draft = createPaperDraft({
+      discoverySignature: sig,
+      type: 'new_discovery',
+      targetSociety: 'basic_magic_society',
+    });
+    submitPaper(draft.id);
+    const review = runDuePaperReview(draft.id);
+
+    assert.ok(review);
+    assert.equal(review.classification.classification, 'unknown');
+    assert.equal(review.canonPenaltyApplied, false);
+    assert.equal(review.accepted, true);
+    // 풀 보상이 들어와야 함 (basic society: 15 / 8 / 300)
+    assert.equal(gameState.resources.degreeScore, 15);
+    assert.equal(gameState.resources.reputation, 8);
+    assert.equal(gameState.resources.researchFunds, 500 + 300);
+  }],
+
+  ['getEligiblePaperPlans hides new_discovery for known_correct canon (M7 PR-F)', () => {
+    resetAll();
+    const sig = 'sig_pr_f_eligible_correct';
+    const analysis = makeAnalysis({ signature: sig, instability: 18, grade: 'single_rune' });
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+
+    gameState.academic.canonMatches[sig] = {
+      canonId: 'canon_002',
+      observed: 'consistent',
+      recordedAt: Date.now(),
+    };
+
+    const plans = getEligiblePaperPlans();
+    const plan = plans.find((p) => p.signature === sig);
+    // mismatch 도 sentence_formula 도 없으므로 plan 자체가 비어있어야 함 (types 0개 → plans 에서 제외)
+    assert.equal(plan, undefined,
+      `known_correct discovery must not surface as a paper plan (got ${JSON.stringify(plan)})`);
+  }],
+
+  ['getEligiblePaperPlans keeps new_discovery for known_disputed canon (M7 PR-F)', () => {
+    resetAll();
+    const sig = 'sig_pr_f_eligible_disputed';
+    const analysis = makeAnalysis({ signature: sig, instability: 18, grade: 'single_rune' });
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+
+    // canon_001 (isCorrect=false) → disputed. new_discovery 옵션은 살아있어야 함.
+    gameState.academic.canonMatches[sig] = {
+      canonId: 'canon_001',
+      observed: 'consistent',
+      recordedAt: Date.now(),
+    };
+
+    const plans = getEligiblePaperPlans();
+    const plan = plans.find((p) => p.signature === sig);
+    assert.ok(plan, 'known_disputed discovery must still surface as a paper plan');
+    assert.ok(plan.types.includes('new_discovery'),
+      `new_discovery must remain available for disputed canon, got types=${JSON.stringify(plan.types)}`);
+    assert.equal(plan.classification.classification, 'known_disputed');
+  }],
+
+  ['inspectCanonMismatch records canonMatches entry on hint match (M7 PR-F)', () => {
+    resetAll();
+    // canon_001 legacyHint = { mainRune: '원(○)', radical: '이사(|)', position: 'middle' }
+    // matchesCanonHint 는 둘 다 legacyMeaning 안에 들어 있어야 통과한다.
+    const sig = 'sig_pr_f_match_record';
+    const analysis = makeAnalysis({
+      signature: sig,
+      meaning: '원(○) + 이사(|)',
+      dynamics: '갇힘(침묵)',
+      instability: 35,
+    });
+    inspectCanonMismatch(analysis);
+
+    const match = getCanonMatchForSignature(sig);
+    assert.ok(match, 'inspectCanonMismatch must record a canonMatch when hint matches');
+    assert.equal(match.canonId, 'canon_001');
+    // 관측값이 정설과 정확히 일치 (dynamics='갇힘(침묵)', instability~=35) → 'consistent' 으로 기록
+    assert.equal(match.observed, 'consistent');
   }],
 ];
 

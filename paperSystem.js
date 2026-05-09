@@ -1,11 +1,21 @@
 import { gameState } from './gameState.js';
 import { getDiscovery } from './discoverySystem.js';
-import { getMismatchForSignature } from './academicCanon.js';
+import {
+  getMismatchForSignature,
+  classifyDiscoveryAgainstCanon,
+} from './academicCanon.js';
 import { PAPER_SOCIETIES } from './data/paperReviewData.js';
 import { emit, on as onBus } from './eventBus.js';
 import { saveGame } from './saveLoad.js';
 import { enqueueEvent } from './schedule.js';
 import { consumeForAction } from './actionCosts.js';
+
+// known_disputed 정설 위에 올라온 new_discovery 논문은 받되 점수와 보상을
+// 차감한다 (옵션 B). 기존 정설 재검증의 부분 기여로 취급. 0.7은 잘 쓴
+// disputed paper 가 basic 학회 acceptThreshold(60)를 통과하면서 high(70)
+// 에는 못 닿는 수준 — raw 95 → final 67. 0.4 시절에는 사실상 hard-reject
+// 였어서 manual 검증 후 완화함.
+const DISPUTED_CANON_PENALTY_MULTIPLIER = 0.7;
 
 // 학회별 심사 지연 일수 — submitPaper 시점에서 N일 뒤 'paper:review_due' 이벤트가
 // fire 되어야 reviewPaper가 호출된다 (M8: 시간 흐름 기반 심사).
@@ -63,6 +73,7 @@ export function getEligiblePaperPlans() {
       discovery,
       types,
       mismatch: getMismatchForSignature(signature),
+      classification: classifyDiscoveryAgainstCanon(signature),
     });
   }
   return plans;
@@ -185,6 +196,31 @@ export function reviewPaper(paper) {
       society: null,
       reviewerVoice: '',
       canonOverride: null,
+      classification: null,
+    };
+  }
+
+  // PR-F: 정설 분류 게이트.
+  // known_correct + new_discovery → 점수와 무관하게 하드 거절.
+  // (학회는 이미 등재된 현상을 신규 발견으로 다시 받지 않는다.)
+  const classification = classifyDiscoveryAgainstCanon(paper.discoverySignature);
+  if (
+    classification.classification === 'known_correct' &&
+    paper.type === 'new_discovery' &&
+    classification.canon
+  ) {
+    const canon = classification.canon;
+    return {
+      accepted: false,
+      disputed: false,
+      score: 0,
+      reasons: [
+        `이미 ${canon.discoveredBy} ${canon.year}년 정설(${canon.title})로 등재된 현상입니다. 신규 발견 등재 불가.`,
+      ],
+      society,
+      reviewerVoice: society.reviewerVoice?.rejected || '',
+      canonOverride: null,
+      classification,
     };
   }
 
@@ -199,13 +235,34 @@ export function reviewPaper(paper) {
       society,
       reviewerVoice: society.reviewerVoice?.rejected || '',
       canonOverride: null,
+      classification,
     };
   }
 
   const scored = scoreReview(paper, society, evidence);
-  const accepted = scored.score >= society.acceptThreshold;
+  let finalScore = scored.score;
+  const finalReasons = [...scored.reasons];
+  let penaltyApplied = false;
+
+  // PR-F: known_disputed + new_discovery → 점수/보상 큰 폭 차감 (옵션 B).
+  // 기존 정설을 검증하는 미세 기여로 취급. 임계값 판정은 차감된 점수 기준이지만,
+  // 페널티 곱이 0.4 이므로 상위 학회 임계값(60+)에는 거의 도달하지 못하고
+  // 낮은 임계값을 가진 학회에서도 marginal 한 통과만 허용된다.
+  if (
+    classification.classification === 'known_disputed' &&
+    paper.type === 'new_discovery' &&
+    classification.canon
+  ) {
+    finalScore = Math.max(0, Math.round(finalScore * DISPUTED_CANON_PENALTY_MULTIPLIER));
+    finalReasons.push(
+      `기존 정설(${classification.canon.title}) 검증 — 미세 기여로 점수 ${Math.round((1 - DISPUTED_CANON_PENALTY_MULTIPLIER) * 100)}% 차감`,
+    );
+    penaltyApplied = true;
+  }
+
+  const accepted = finalScore >= society.acceptThreshold;
   const challengesCanon = paper.type === 'challenge' || paper.type === 'refinement';
-  const disputed = !accepted && challengesCanon && scored.score >= society.rejectThreshold;
+  const disputed = !accepted && challengesCanon && finalScore >= society.rejectThreshold;
 
   const outcomeKey = accepted ? 'accepted' : disputed ? 'disputed' : 'rejected';
   const reviewerVoice = society.reviewerVoice?.[outcomeKey] || '';
@@ -213,11 +270,13 @@ export function reviewPaper(paper) {
   return {
     accepted,
     disputed,
-    score: scored.score,
-    reasons: scored.reasons,
+    score: finalScore,
+    reasons: finalReasons,
     society,
     reviewerVoice,
     canonOverride: null,
+    classification,
+    canonPenaltyApplied: penaltyApplied,
   };
 }
 
@@ -234,7 +293,9 @@ function finalizePaperReview(paper, review) {
       if (override) review.canonOverride = override;
     }
 
-    applyRewards(review.society.rewards);
+    const rewardMultiplier = review.canonPenaltyApplied ? DISPUTED_CANON_PENALTY_MULTIPLIER : 1;
+    const grantedRewards = applyRewards(review.society.rewards, rewardMultiplier);
+    review.grantedRewards = grantedRewards;
     emit('paper:accepted', { paper, review });
     return;
   }
@@ -370,10 +431,16 @@ function scoreReproBand(repro, thresholds, points) {
   return earned;
 }
 
-function applyRewards(rewards) {
-  gameState.resources.degreeScore += rewards.degreeScore || 0;
-  gameState.resources.reputation += rewards.reputation || 0;
-  gameState.resources.researchFunds += rewards.researchFunds || 0;
+function applyRewards(rewards, multiplier = 1) {
+  const granted = {
+    degreeScore: Math.round((rewards.degreeScore || 0) * multiplier),
+    reputation: Math.round((rewards.reputation || 0) * multiplier),
+    researchFunds: Math.round((rewards.researchFunds || 0) * multiplier),
+  };
+  gameState.resources.degreeScore += granted.degreeScore;
+  gameState.resources.reputation += granted.reputation;
+  gameState.resources.researchFunds += granted.researchFunds;
+  return granted;
 }
 
 function buildEvidence(discovery) {
@@ -404,6 +471,7 @@ function deriveSentenceGrade(discovery) {
 function getEligiblePaperTypes(discovery) {
   const types = [];
   const mismatch = getMismatchForSignature(discovery.signature);
+  const classification = classifyDiscoveryAgainstCanon(discovery.signature);
   const repro = discovery.reproducibility?.count || 0;
   const grade = deriveSentenceGrade(discovery);
 
@@ -411,7 +479,12 @@ function getEligiblePaperTypes(discovery) {
     p => p.discoverySignature === discovery.signature && p.type === 'new_discovery'
   );
 
-  if (repro >= 3 && !hasAcceptedNew) types.push('new_discovery');
+  // PR-F: 이미 등재된 정설(known_correct) 위에는 new_discovery 옵션을 노출하지
+  // 않는다. 플레이어가 2일 비용을 들여 작성한 뒤 reviewPaper 에서 하드 거절
+  // 당하는 일을 막기 위함. challenge/refinement 는 mismatch 가 잡혀야 등장하므로
+  // known_correct (mismatch 없음) 에서는 자연히 비활성화된다.
+  const isKnownCorrect = classification.classification === 'known_correct';
+  if (repro >= 3 && !hasAcceptedNew && !isKnownCorrect) types.push('new_discovery');
   if (mismatch) types.push('refinement');
   if (mismatch && repro >= 10) types.push('challenge');
   if (grade === 'sentence' || grade === 'incantation') types.push('sentence_formula');
