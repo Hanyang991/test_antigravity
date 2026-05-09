@@ -33,6 +33,7 @@ const { analyzeBoneInteraction } = await import('../bone-interaction.js');
 const { analyzeMagic } = await import('../magicPipeline.js');
 const { RiftGame } = await import('../rift.js');
 const { AssignmentSystem } = await import('../assignmentSystem.js');
+const { formatCanvasStatus, formatCastInjection } = await import('../magicStatusUi.js');
 
 function resetAll() {
   resetState();
@@ -626,6 +627,57 @@ const tests = [
 
     assert.equal(compoundResult.result, 'miss');
     assert.ok(!sys.message.includes('마그마'), `miss message leaks "마그마": ${sys.message}`);
+  }],
+
+  ['canvas systemStatus does not leak legacy rune names by default (blind mode §11)', () => {
+    resetAll();
+
+    const LEGACY_NAMES = [
+      '이사', '대지', '게보', '알기즈', '티와즈',
+      '하갈라즈', '에와즈', '열기', '나우디즈',
+      '라구즈', '케나즈', '다가즈',
+      '마그마', '폭발', '봉인된 태양',
+    ];
+
+    // 5가지 분기를 모두 통과시켜 §11 위반이 한 곳도 없는지 확인.
+    const cases = [
+      { instability: 95, currentMeaning: '이사(|)', currentDynamics: '관통', hasLiveStroke: true, canCast: false }, // 붕괴 임박
+      { instability: 30, currentCompound: '마그마', currentDynamics: '분출', hasLiveStroke: true, canCast: true },   // 결합 발현
+      { instability: 30, currentCompound: '마그마', currentDynamics: '분출', hasLiveStroke: true, canCast: false },  // 결합 감지
+      { instability: 30, currentMeaning: '나우디즈(+)', currentDynamics: '집중', hasLiveStroke: true, canCast: true }, // 발현 중
+      { instability: 30, currentMeaning: '열기(△)', currentDynamics: '', hasLiveStroke: true, canCast: false },     // 분석 중
+      { instability: 0,  currentMeaning: '', currentCompound: '', currentDynamics: '', hasLiveStroke: false, canCast: false }, // 대기
+    ];
+
+    for (const input of cases) {
+      const out = formatCanvasStatus(input, { debugShowLegacyNames: false });
+      for (const legacy of LEGACY_NAMES) {
+        assert.ok(
+          !out.text.includes(legacy),
+          `formatCanvasStatus("${out.text}") leaks legacy name "${legacy}" for input ${JSON.stringify(input)}`
+        );
+      }
+    }
+
+    const cast = formatCastInjection({ currentMeaning: '나우디즈(+)' }, { debugShowLegacyNames: false });
+    for (const legacy of LEGACY_NAMES) {
+      assert.ok(
+        !cast.includes(legacy),
+        `formatCastInjection("${cast}") leaks legacy name "${legacy}"`
+      );
+    }
+  }],
+
+  ['canvas systemStatus appends legacy names when debugShowLegacyNames is on (M6 dev toggle)', () => {
+    resetAll();
+    const status = formatCanvasStatus(
+      { instability: 30, currentMeaning: '나우디즈(+)', currentDynamics: '집중', hasLiveStroke: true, canCast: true },
+      { debugShowLegacyNames: true }
+    );
+    assert.ok(status.text.includes('나우디즈'), `debug status should include legacy: ${status.text}`);
+
+    const cast = formatCastInjection({ currentMeaning: '나우디즈(+)' }, { debugShowLegacyNames: true });
+    assert.ok(cast.includes('나우디즈'), `debug cast injection should include legacy: ${cast}`);
   }],
 
   ['rift game rewards a correctly drawn rune cast', () => {
