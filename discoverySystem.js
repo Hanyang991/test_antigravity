@@ -82,14 +82,23 @@ export function recordDiscovery(analysis) {
       existing.status = 'reproducible';
     }
 
-    // 기초 룬 3회 재현 시 도감 해금
-    if (existing.reproducibility.count >= 3 && !existing._legacyCompound) {
-      const grade = analysis.sentence?.grade || 'single_rune';
-      if (grade === 'single_rune' || grade === 'word') {
-        const runeName = existing._legacyMeaning;
-        if (runeName && !gameState.progression.unlockedRunes.includes(runeName)) {
-          gameState.progression.unlockedRunes.push(runeName);
-          emit('dictionary:unlocked', { runeName, entry: existing });
+    // 도감 해금 — 3회 재현 시. 복합 룬은 unlockedCompounds, 기초 룬은 unlockedRunes에 등록.
+    if (existing.reproducibility.count >= 3) {
+      if (existing._legacyCompound) {
+        const compoundName = existing._legacyCompound;
+        const compounds = gameState.progression.unlockedCompounds;
+        if (compoundName && Array.isArray(compounds) && !compounds.includes(compoundName)) {
+          compounds.push(compoundName);
+          emit('dictionary:unlocked', { compoundName, entry: existing, kind: 'compound' });
+        }
+      } else {
+        const grade = analysis.sentence?.grade || 'single_rune';
+        if (grade === 'single_rune' || grade === 'word') {
+          const runeName = existing._legacyMeaning;
+          if (runeName && !gameState.progression.unlockedRunes.includes(runeName)) {
+            gameState.progression.unlockedRunes.push(runeName);
+            emit('dictionary:unlocked', { runeName, entry: existing, kind: 'rune' });
+          }
         }
       }
     }

@@ -28,6 +28,7 @@ export const gameState = {
       finalPassed: false,
     },
     unlockedRunes: [],
+    unlockedCompounds: [],
     unlockedMaterials: ['parchment'],
     unlockedEquipment: [],
   },
@@ -108,7 +109,7 @@ export function resetState() {
   const fresh = {
     version: 2,
     resources: { researchFunds: 500, reputation: 0, degreeScore: 0, mentalHealth: 100, stamina: 100 },
-    progression: { currentPhase: 1, currentWeek: 1, currentDay: 1, warnings: 0, exams: { midtermPassed: false, finalPassed: false }, unlockedRunes: [], unlockedMaterials: ['parchment'], unlockedEquipment: [] },
+    progression: { currentPhase: 1, currentWeek: 1, currentDay: 1, warnings: 0, exams: { midtermPassed: false, finalPassed: false }, unlockedRunes: [], unlockedCompounds: [], unlockedMaterials: ['parchment'], unlockedEquipment: [] },
     discoveries: { bySignature: {}, recentSignatures: [] },
     papers: { drafts: [], submitted: [], accepted: [], rejected: [], disputes: [] },
     expeditions: { active: [], completed: [], unlockedSiteIds: [] },
