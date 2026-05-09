@@ -126,8 +126,11 @@ export function advanceDay(days = 1) {
       day: gameState.progression.currentDay,
     });
 
-    completedExpeditions.push(...tickExpeditions());
+    // 답사 귀환을 'expedition:return' 이벤트로 처리하므로 dispatchDueEvents가
+    // tickExpeditions보다 먼저 돌아야 한다 — 이벤트 리스너가 _completionBuffer에
+    // 결과를 쌓으면, 그 다음 tickExpeditions가 버퍼를 비워서 호출자에게 돌려준다.
     firedEvents.push(...dispatchDueEvents(nowIndex));
+    completedExpeditions.push(...tickExpeditions());
     gameState.schedule.lastDayIndex = nowIndex;
   }
 
