@@ -18,7 +18,7 @@ globalThis.localStorage = {
 
 const { gameState, resetState } = await import('../gameState.js');
 const { recordDiscovery, getDiscovery } = await import('../discoverySystem.js');
-const { createPaperDraft, submitPaper } = await import('../paperSystem.js');
+const { createPaperDraft, getPaperSuggestion, submitPaper } = await import('../paperSystem.js');
 const { applyForGrant, signContract, sellScroll, tickEconomyWeek } = await import('../economy.js');
 const { startExpedition } = await import('../expedition.js');
 const { advanceDay } = await import('../schedule.js');
@@ -217,6 +217,50 @@ const tests = [
     assert.equal(gameState.papers.accepted.length, 1);
     assert.equal(gameState.resources.degreeScore, 15);
     assert.equal(gameState.resources.researchFunds, 800);
+  }],
+
+  ['paper draft preserves user-provided title and claim (M7 modal flow)', () => {
+    resetAll();
+    const analysis = makeAnalysis({ signature: 'sig_modal', instability: 18, grade: 'single_rune' });
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+
+    const userTitle = '플레이어가 직접 작성한 제목';
+    const userClaim = '관측한 결과 X 조건에서 Y 패턴이 일관되게 재현됨을 보고한다.';
+
+    const draft = createPaperDraft({
+      discoverySignature: 'sig_modal',
+      type: 'new_discovery',
+      targetSociety: 'basic_magic_society',
+      title: userTitle,
+      claim: userClaim,
+    });
+
+    assert.ok(draft);
+    assert.equal(draft.title, userTitle, 'user-provided title must be preserved verbatim');
+    assert.equal(draft.claim, userClaim, 'user-provided claim must be preserved verbatim');
+  }],
+
+  ['getPaperSuggestion returns prefill values for the modal (M7)', () => {
+    resetAll();
+    const analysis = makeAnalysis({ signature: 'sig_suggestion', instability: 18, grade: 'single_rune' });
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+
+    const suggestion = getPaperSuggestion('sig_suggestion', 'new_discovery');
+    assert.equal(suggestion.ok, true);
+    assert.ok(suggestion.discovery, 'discovery must be returned');
+    assert.equal(suggestion.evidence.reproductionCount, 3);
+    assert.equal(typeof suggestion.suggestedTitle, 'string');
+    assert.ok(suggestion.suggestedTitle.length > 0, 'suggested title must be non-empty prefill');
+    assert.equal(typeof suggestion.suggestedClaim, 'string');
+    assert.ok(suggestion.suggestedClaim.length > 0, 'suggested claim must be non-empty prefill');
+
+    // 알 수 없는 signature는 ok:false 로 반환
+    const missing = getPaperSuggestion('sig_does_not_exist', 'new_discovery');
+    assert.equal(missing.ok, false);
   }],
 
   ['economy grants, contracts, and scroll sales update funds', () => {

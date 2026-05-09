@@ -12,7 +12,7 @@ import { gameState } from './gameState.js';
 import { on } from './eventBus.js';
 import { getAllDiscoveries, nameDiscovery } from './discoverySystem.js';
 import { getCanonMismatches } from './academicCanon.js';
-import { createPaperDraft, getEligiblePaperPlans, getSocieties, submitPaper } from './paperSystem.js';
+import { createPaperDraft, getEligiblePaperPlans, getPaperSuggestion, getSocieties, submitPaper } from './paperSystem.js';
 import { getExpeditionSites, startExpedition } from './expedition.js';
 import { applyForGrant, getGrantOffers, getContractOffers, sellScroll, signContract } from './economy.js';
 import { advanceDay } from './schedule.js';
@@ -455,15 +455,135 @@ function refreshPaperList() {
     const typeEl = card.querySelector('.paper-type');
     const societyEl = card.querySelector('.paper-society');
     button.addEventListener('click', () => {
-      const draft = createPaperDraft({
-        discoverySignature: card.dataset.sig,
+      openPaperDraftModal({
+        signature: card.dataset.sig,
         type: typeEl.value,
         targetSociety: societyEl.value,
       });
-      if (draft) submitPaper(draft.id);
-      refreshPaperList();
     });
   });
+}
+
+function openPaperDraftModal({ signature, type, targetSociety }) {
+  const suggestion = getPaperSuggestion(signature, type);
+  if (!suggestion.ok) {
+    showToast('error', '발견을 찾을 수 없습니다.', '');
+    return;
+  }
+
+  // 기존 열린 모달 제거
+  document.getElementById('paper-draft-modal')?.remove();
+
+  const society = getSocieties().find((s) => s.id === targetSociety) || { name: targetSociety };
+  const evidence = suggestion.evidence;
+  const discoveryName = suggestion.discovery.playerName || '미확인 현상';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'paper-draft-modal';
+  overlay.style.cssText = `
+    position: fixed; inset: 0; z-index: 9999;
+    background: rgba(8, 4, 16, 0.78);
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(2px);
+  `;
+
+  overlay.innerHTML = `
+    <div style="
+      width: min(560px, 92vw); max-height: 86vh; overflow: auto;
+      background: linear-gradient(180deg, rgba(28, 18, 48, 0.96), rgba(18, 10, 36, 0.96));
+      border: 1px solid rgba(160, 120, 220, 0.45);
+      border-radius: 8px;
+      padding: 18px 20px;
+      color: #e7dffb;
+      font-family: var(--font-text, system-ui), serif;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+    ">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0; font-size:1.05rem; color:#d8c8ff;">논문 초안 작성</h3>
+        <button id="paper-draft-close" style="
+          background:transparent; color:#aaa; border:none; font-size:1.4rem; cursor:pointer; line-height:1;
+        ">×</button>
+      </div>
+
+      <div style="font-size:0.78rem; color:#b9a9d6; margin-bottom:10px;">
+        <div>대상 발견: <span style="color:#fff;">${escapeHtml(discoveryName)}</span></div>
+        <div>제출 학회: <span style="color:#fff;">${escapeHtml(society.name)}</span></div>
+        <div>논문 유형: <span style="color:#fff;">${escapeHtml(type)}</span></div>
+      </div>
+
+      <div style="
+        background: rgba(0,0,0,0.25);
+        border:1px solid rgba(255,255,255,0.06);
+        border-radius:4px; padding:8px 10px; margin-bottom:12px;
+        font-size:0.72rem; color:#9c8eb8;
+      ">
+        <div style="font-size:0.66rem; color:#7a6d96; margin-bottom:4px; letter-spacing:0.3px;">증거 요약</div>
+        <div>재현 ${evidence.reproductionCount}회 · 평균 열 ${evidence.averageHeat}°C · 평균 불안정 ${evidence.averageInstability}%</div>
+        <div>등급 ${escapeHtml(evidence.sentenceGrade)} · 바탕재 ${evidence.materialsTested.join(', ') || '없음'}</div>
+        ${suggestion.mismatch ? `<div style="color:#ffcc88; margin-top:4px;">정설 불일치: ${escapeHtml(suggestion.mismatch.canonOfficialName || '')}</div>` : ''}
+      </div>
+
+      <label style="display:block; font-size:0.72rem; color:#a99cc7; margin-bottom:4px;">제목</label>
+      <input id="paper-draft-title" type="text" value="${escapeHtml(suggestion.suggestedTitle)}" style="
+        width:100%; padding:8px 10px; margin-bottom:12px;
+        background: rgba(0,0,0,0.35); color:#fff;
+        border:1px solid rgba(160, 120, 220, 0.3); border-radius:4px;
+        font-size:0.85rem;
+      "/>
+
+      <label style="display:block; font-size:0.72rem; color:#a99cc7; margin-bottom:4px;">주장 (요약)</label>
+      <textarea id="paper-draft-claim" rows="4" style="
+        width:100%; padding:8px 10px; margin-bottom:6px;
+        background: rgba(0,0,0,0.35); color:#fff;
+        border:1px solid rgba(160, 120, 220, 0.3); border-radius:4px;
+        font-size:0.82rem; resize:vertical; font-family:inherit;
+      ">${escapeHtml(suggestion.suggestedClaim)}</textarea>
+      <div style="font-size:0.66rem; color:#7a6d96; margin-bottom:14px;">
+        프리필된 문구는 자동 생성된 초안입니다. 본인의 관측·해석으로 수정하세요.
+      </div>
+
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button id="paper-draft-cancel" style="${buttonStyle()}">취소</button>
+        <button id="paper-draft-reset" style="${buttonStyle()}">프리필 복원</button>
+        <button id="paper-draft-submit" style="${buttonStyle()}; background: rgba(80, 130, 200, 0.5);">초안 작성·제출</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.querySelector('#paper-draft-close').addEventListener('click', close);
+  overlay.querySelector('#paper-draft-cancel').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  const titleEl = overlay.querySelector('#paper-draft-title');
+  const claimEl = overlay.querySelector('#paper-draft-claim');
+
+  overlay.querySelector('#paper-draft-reset').addEventListener('click', () => {
+    titleEl.value = suggestion.suggestedTitle;
+    claimEl.value = suggestion.suggestedClaim;
+  });
+
+  overlay.querySelector('#paper-draft-submit').addEventListener('click', () => {
+    const title = titleEl.value.trim();
+    const claim = claimEl.value.trim();
+    if (!title) { titleEl.focus(); return; }
+    if (!claim) { claimEl.focus(); return; }
+
+    const draft = createPaperDraft({
+      discoverySignature: signature,
+      type,
+      targetSociety,
+      title,
+      claim,
+    });
+    if (draft) submitPaper(draft.id);
+    close();
+    refreshPaperList();
+  });
+
+  setTimeout(() => titleEl.focus(), 0);
 }
 
 function refreshExpeditionList() {

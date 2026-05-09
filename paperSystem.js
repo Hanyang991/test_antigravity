@@ -9,6 +9,27 @@ export function getSocieties() {
   return Object.values(PAPER_SOCIETIES);
 }
 
+/**
+ * 논문 작성 모달 프리필 — 발견의 증거 요약과 추천 제목/주장을 반환한다.
+ * 플레이어는 모달에서 이를 확인·편집한 뒤 createPaperDraft + submitPaper를 호출한다.
+ *
+ * @param {string} signature
+ * @param {string} type  'new_discovery' | 'refinement' | 'challenge' | 'sentence_formula' | 'forbidden'
+ * @returns {{ ok: boolean, discovery?: Object, evidence?: Object, suggestedTitle?: string, suggestedClaim?: string, mismatch?: Object|null }}
+ */
+export function getPaperSuggestion(signature, type = 'new_discovery') {
+  const discovery = getDiscovery(signature);
+  if (!discovery) return { ok: false };
+  return {
+    ok: true,
+    discovery,
+    evidence: buildEvidence(discovery),
+    suggestedTitle: suggestTitle(discovery, type),
+    suggestedClaim: suggestClaim(discovery, type),
+    mismatch: getMismatchForSignature(signature),
+  };
+}
+
 export function getEligiblePaperPlans() {
   const plans = [];
   for (const signature of gameState.discoveries.recentSignatures) {
