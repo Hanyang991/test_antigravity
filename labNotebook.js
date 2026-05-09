@@ -186,7 +186,7 @@ function createNotebookTab() {
       margin-left: 4px;
       display: none;
     ">0</span></button>
-    <button class="archive-tab" data-tab="papers">논문 <span id="paper-badge" style="
+    <button class="archive-tab" data-tab="paper">논문 <span id="paper-badge" style="
       background: rgba(0,180,255,0.8);
       border-radius: 8px;
       padding: 1px 6px;
@@ -284,7 +284,7 @@ function createNotebookTab() {
         child.style.display = child.id === `${tab}-panel` ? 'block' : 'none';
       }
       if (tab === 'notebook') refreshNotebookList();
-      else if (tab === 'papers') refreshPaperList();
+      else if (tab === 'paper') refreshPaperList();
       else if (tab === 'expedition') refreshExpeditionList();
       else if (tab === 'dictionary') refreshDictionaryList();
     }
