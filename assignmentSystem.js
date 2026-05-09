@@ -19,26 +19,30 @@ function compoundSvg(svg) {
     return `<svg width="80" height="80" viewBox="0 0 100 100">${svg}</svg>`;
 }
 
+// 블라인드 모드 (계획서 §11): 일일 과제 라벨에는 정답명을 절대 노출하지 않는다.
+// `match`는 내부 매칭에만 쓰이고, 플레이어에게는 `label`(관측 가능한 형태 묘사)와
+// `sketch`(SVG)만 표시한다.
 const RUNE_DEMANDS = [
-    { match: '이사(|)',    label: '이사 (Ⅰ)',     sketch: lineSvg([[50,10,50,90]]) },
-    { match: '대지(ㅡ)',   label: '대지 (—)',     sketch: lineSvg([[10,50,90,50]]) },
-    { match: '원(○)',      label: '원 (○)',       sketch: circleSvg() },
-    { match: '게보(X)',    label: '게보 (X)',     sketch: lineSvg([[20,20,80,80],[80,20,20,80]]) },
-    { match: '알기즈(Y)',  label: '알기즈 (Y)',   sketch: lineSvg([[50,90,50,50],[50,50,20,10],[50,50,80,10]]) },
-    { match: '티와즈(↑)',  label: '티와즈 (↑)',   sketch: lineSvg([[50,90,50,10],[50,10,20,40],[50,10,80,40]]) },
-    { match: '하갈라즈(H)', label: '하갈라즈 (H)', sketch: lineSvg([[15,15,15,85],[85,15,85,85],[15,50,85,50]]) },
-    { match: '에와즈(M)',  label: '에와즈 (M)',   sketch: lineSvg([[15,85,15,15],[15,15,50,85],[50,85,85,15],[85,15,85,85]]) },
-    { match: '열기(△)',    label: '열기 (△)',     sketch: lineSvg([[50,15,15,85],[15,85,85,85],[85,85,50,15]]) },
-    { match: '나우디즈(+)', label: '나우디즈 (+)', sketch: lineSvg([[50,15,50,85],[15,50,85,50]]) },
-    { match: '라구즈(L)',  label: '라구즈 (L)',   sketch: lineSvg([[15,15,15,85],[15,85,85,85]]) },
-    { match: '케나즈(<)',  label: '케나즈 (<)',   sketch: lineSvg([[80,15,20,50],[20,50,80,85]]) },
-    { match: '다가즈(◇)',  label: '다가즈 (◇)',   sketch: lineSvg([[50,15,85,50],[85,50,50,85],[50,85,15,50],[15,50,50,15]]) }
+    { match: '이사(|)',    label: 'Ⅰ — 수직 직선 1획',           sketch: lineSvg([[50,10,50,90]]) },
+    { match: '대지(ㅡ)',   label: '— — 수평 직선 1획',           sketch: lineSvg([[10,50,90,50]]) },
+    { match: '원(○)',      label: '○ — 닫힌 원 형태',            sketch: circleSvg() },
+    { match: '게보(X)',    label: 'X — 두 사선이 교차',          sketch: lineSvg([[20,20,80,80],[80,20,20,80]]) },
+    { match: '알기즈(Y)',  label: 'Y — 수직선 + 위 양 갈래',     sketch: lineSvg([[50,90,50,50],[50,50,20,10],[50,50,80,10]]) },
+    { match: '티와즈(↑)',  label: '↑ — 수직선 + 위 좁은 갈래',   sketch: lineSvg([[50,90,50,10],[50,10,20,40],[50,10,80,40]]) },
+    { match: '하갈라즈(H)', label: 'H — 수직 두 획 + 가운데 가로', sketch: lineSvg([[15,15,15,85],[85,15,85,85],[15,50,85,50]]) },
+    { match: '에와즈(M)',  label: 'M — 지그재그 4획',            sketch: lineSvg([[15,85,15,15],[15,15,50,85],[50,85,85,15],[85,15,85,85]]) },
+    { match: '열기(△)',    label: '△ — 삼각형',                  sketch: lineSvg([[50,15,15,85],[15,85,85,85],[85,85,50,15]]) },
+    { match: '나우디즈(+)', label: '+ — 수직 + 수평 십자',        sketch: lineSvg([[50,15,50,85],[15,50,85,50]]) },
+    { match: '라구즈(L)',  label: 'L — 수직 + 아래 수평',         sketch: lineSvg([[15,15,15,85],[15,85,85,85]]) },
+    { match: '케나즈(<)',  label: '< — 좌측으로 꺾인 두 사선',    sketch: lineSvg([[80,15,20,50],[20,50,80,85]]) },
+    { match: '다가즈(◇)',  label: '◇ — 마름모',                  sketch: lineSvg([[50,15,85,50],[85,50,50,85],[50,85,15,50],[15,50,50,15]]) }
 ];
 
+// 복합 룬 과제도 정답명 대신 "복합 형태 #N — 관측되는 형상" 으로만 표시한다.
 const COMPOUND_DEMANDS = [
     {
         match: '마그마',
-        label: '마그마 현상 재현',
+        label: '복합 형태 #A — △ + 아래 가로 빗금',
         sketch: compoundSvg(
             '<line x1="50" y1="20" x2="20" y2="65" stroke="rgba(44, 36, 27, 0.8)" stroke-width="4"/>' +
             '<line x1="20" y1="65" x2="80" y2="65" stroke="rgba(44, 36, 27, 0.8)" stroke-width="4"/>' +
@@ -49,7 +53,7 @@ const COMPOUND_DEMANDS = [
     },
     {
         match: '폭발',
-        label: '폭발 반응 증명',
+        label: '복합 형태 #B — 위 가로 빗금 + △',
         sketch: compoundSvg(
             '<line x1="20" y1="22" x2="80" y2="22" stroke="rgba(139, 0, 0, 0.8)" stroke-width="4"/>' +
             '<line x1="50" y1="35" x2="20" y2="80" stroke="rgba(44, 36, 27, 0.8)" stroke-width="4"/>' +
@@ -60,7 +64,7 @@ const COMPOUND_DEMANDS = [
     },
     {
         match: '봉인된 태양',
-        label: '봉인된 태양 구조 확인',
+        label: '복합 형태 #C — ○ + 가운데 가로 빗금',
         sketch: compoundSvg(
             '<circle cx="50" cy="50" r="28" stroke="rgba(44, 36, 27, 0.8)" stroke-width="4" fill="none"/>' +
             '<line x1="15" y1="50" x2="85" y2="50" stroke="rgba(139, 0, 0, 0.8)" stroke-width="4"/>'
@@ -135,6 +139,7 @@ export class AssignmentSystem {
         if (incomplete.length > 0) {
             const penalty = incomplete.length * 100;
             this.score = Math.max(0, this.score - penalty);
+            // 블라인드 모드 — `q.label`은 정답명이 아닌 관측 묘사이므로 그대로 노출 가능.
             const names = incomplete.map(q => q.label).join(', ');
             this.message = `지도교수: "어제 [${names}] 과제를 완료하지 못했군. 실망이네." (-${penalty}G)`;
             this.lastResult = 'expired';
@@ -209,9 +214,9 @@ export class AssignmentSystem {
             return { result: 'success', score: this.score };
         }
 
-        // 매칭 실패 — 과제와 무관한 룬을 그린 경우 감점하지 않고 안내만
-        const got = analysis.compoundName || analysis.meaning || '알 수 없는 문양';
-        this.message = `지도교수: "[${got}]은(는) 오늘 과제가 아닌데? 과제 목록을 확인해보게."`;
+        // 매칭 실패 — 과제와 무관한 형태를 그린 경우 감점하지 않고 안내만.
+        // 블라인드 모드(계획서 §11): 그린 룬의 정답명은 노출하지 않는다.
+        this.message = `지도교수: "오늘 과제 형태와 일치하지 않는 문양이군. 과제 목록을 다시 확인해보게."`;
         this.lastResult = null;
         return { result: 'miss' };
     }
