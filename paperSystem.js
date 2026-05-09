@@ -5,6 +5,7 @@ import { PAPER_SOCIETIES } from './data/paperReviewData.js';
 import { emit, on as onBus } from './eventBus.js';
 import { saveGame } from './saveLoad.js';
 import { enqueueEvent } from './schedule.js';
+import { consumeForAction } from './actionCosts.js';
 
 // 학회별 심사 지연 일수 — submitPaper 시점에서 N일 뒤 'paper:review_due' 이벤트가
 // fire 되어야 reviewPaper가 호출된다 (M8: 시간 흐름 기반 심사).
@@ -95,6 +96,9 @@ export function createPaperDraft({
   gameState.papers.drafts.unshift(draft);
   emit('paper:drafted', draft);
   saveGame();
+
+  const timeConsumed = consumeForAction('createPaperDraft');
+  if (timeConsumed > 0) draft.timeConsumed = timeConsumed;
   return draft;
 }
 

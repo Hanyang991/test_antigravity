@@ -3,6 +3,7 @@ import { gameState } from './gameState.js';
 import { getDiscovery } from './discoverySystem.js';
 import { emit } from './eventBus.js';
 import { saveGame } from './saveLoad.js';
+import { consumeForAction } from './actionCosts.js';
 
 const GRADE_BONUS = {
   single_rune: 0,
@@ -37,7 +38,8 @@ export function applyForGrant(grantId) {
   gameState.resources.reputation += grant.reputationDelta || 0;
   emit('economy:grantAccepted', active);
   saveGame();
-  return { ok: true, grant: active };
+  const timeConsumed = consumeForAction('applyForGrant');
+  return { ok: true, grant: active, timeConsumed };
 }
 
 export function signContract(contractId) {
@@ -56,7 +58,8 @@ export function signContract(contractId) {
   gameState.resources.researchFunds += contract.upfront;
   emit('economy:contractSigned', active);
   saveGame();
-  return { ok: true, contract: active };
+  const timeConsumed = consumeForAction('signContract');
+  return { ok: true, contract: active, timeConsumed };
 }
 
 export function canSellScroll(analysis, discovery) {
@@ -82,7 +85,8 @@ export function sellScroll(signature, analysis) {
   });
   emit('economy:scrollSold', { signature, price });
   saveGame();
-  return { ok: true, price };
+  const timeConsumed = consumeForAction('sellScroll');
+  return { ok: true, price, timeConsumed };
 }
 
 export function tickEconomyWeek() {

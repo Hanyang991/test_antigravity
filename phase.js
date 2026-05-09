@@ -8,7 +8,14 @@ const PHASE_LABELS = {
   2: '석사 졸업반',
   3: '박사 과정',
   4: '교수 임용',
+  5: '석학(원로)',
 };
+
+/**
+ * Phase 5 에서 해금되는 능력. 자기 발견을 정설로 등재할 수 있다.
+ * UI는 progression.canRegisterCanon 플래그를 보고 "정설 등재" 버튼을 노출한다.
+ */
+const PHASE_FIVE_ABILITIES = ['register_canon'];
 
 export function getCurrentPhaseInfo() {
   const phase = gameState.progression.currentPhase;
@@ -77,10 +84,17 @@ export function checkPhaseProgress() {
   if (nextPhase >= 3 && !gameState.progression.unlockedMaterials.includes('obsidian')) {
     gameState.progression.unlockedMaterials.push('obsidian');
   }
+  if (nextPhase >= 5 && !gameState.progression.unlockedMaterials.includes('voidstone')) {
+    gameState.progression.unlockedMaterials.push('voidstone');
+  }
+  if (nextPhase >= 5) {
+    gameState.progression.canRegisterCanon = true;
+  }
 
-  emit('phase:advanced', { phase: nextPhase, name: PHASE_LABELS[nextPhase] });
+  const abilities = nextPhase >= 5 ? PHASE_FIVE_ABILITIES : [];
+  emit('phase:advanced', { phase: nextPhase, name: PHASE_LABELS[nextPhase], abilities });
   saveGame();
-  return { promoted: true, phase: nextPhase, name: PHASE_LABELS[nextPhase] };
+  return { promoted: true, phase: nextPhase, name: PHASE_LABELS[nextPhase], abilities };
 }
 
 function calculateExamScore(isFinal = false) {
