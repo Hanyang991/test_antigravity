@@ -2,8 +2,28 @@ import { gameState } from './gameState.js';
 import { getDiscovery } from './discoverySystem.js';
 import { getMismatchForSignature } from './academicCanon.js';
 import { PAPER_SOCIETIES } from './data/paperReviewData.js';
-import { emit } from './eventBus.js';
+import { emit, on as onBus } from './eventBus.js';
 import { saveGame } from './saveLoad.js';
+import { enqueueEvent } from './schedule.js';
+
+// 학회별 심사 지연 일수 — submitPaper 시점에서 N일 뒤 'paper:review_due' 이벤트가
+// fire 되어야 reviewPaper가 호출된다 (M8: 시간 흐름 기반 심사).
+const REVIEW_DELAY_DAYS = {
+  basic_magic_society: 3,
+  thermodynamic_magic_society: 5,
+  high_magic_society: 7,
+  forbidden_magic_society: 10,
+};
+
+function getReviewDelayDays(societyId) {
+  return REVIEW_DELAY_DAYS[societyId] ?? 5;
+}
+
+function getCurrentDayIndex() {
+  const week = gameState.progression.currentWeek || 1;
+  const day = gameState.progression.currentDay || 1;
+  return ((week - 1) * 7) + day;
+}
 
 export function getSocieties() {
   return Object.values(PAPER_SOCIETIES);
@@ -78,6 +98,16 @@ export function createPaperDraft({
   return draft;
 }
 
+/**
+ * 논문 제출 — 즉시 심사하지 않고 학회별 지연 후 'paper:review_due' 이벤트가
+ * fire되어야 심사가 끝난다. consumeTime/advanceDay가 schedule 큐를 dispatch
+ * 하면서 자동으로 runDuePaperReview를 트리거한다.
+ *
+ * @param {string} paperId
+ * @returns {Object|null}  제출된 paper 객체 (status='submitted'). 심사 결과는
+ *   `papers.accepted` / `papers.rejected` 에서 확인하거나 'paper:accepted' /
+ *   'paper:rejected' 이벤트로 수신한다.
+ */
 export function submitPaper(paperId) {
   const index = gameState.papers.drafts.findIndex((paper) => paper.id === paperId);
   if (index < 0) return null;
@@ -85,14 +115,48 @@ export function submitPaper(paperId) {
   const paper = gameState.papers.drafts.splice(index, 1)[0];
   paper.status = 'submitted';
   paper.submittedAt = Date.now();
+
+  const delayDays = getReviewDelayDays(paper.targetSociety);
+  paper.reviewDelayDays = delayDays;
+  paper.reviewDueDayIndex = getCurrentDayIndex() + delayDays;
+
   gameState.papers.submitted.unshift(paper);
   emit('paper:submitted', paper);
 
+  enqueueEvent({
+    delayDays,
+    type: 'paper:review_due',
+    payload: { paperId: paper.id },
+    label: `${paper.title || '논문'} 심사 마감`,
+  });
+
+  saveGame();
+  return paper;
+}
+
+/**
+ * 'paper:review_due' 이벤트 수신 시 즉시 호출되거나, 외부에서 강제로 심사를
+ * 트리거하고 싶을 때 호출. 이미 accepted/rejected 처리된 논문은 다시 처리하지
+ * 않는다.
+ */
+export function runDuePaperReview(paperId) {
+  const submittedIdx = gameState.papers.submitted.findIndex((p) => p.id === paperId);
+  if (submittedIdx < 0) return null;
+
+  const paper = gameState.papers.submitted[submittedIdx];
   const review = reviewPaper(paper);
   finalizePaperReview(paper, review);
   saveGame();
   return review;
 }
+
+// 모듈 로드 시 단 한 번 등록되는 리스너. consumeTime/advanceDay가 큐 이벤트를
+// dispatch하면 schedule.js가 emit('paper:review_due', event) 호출하므로
+// payload.paperId 로 실제 심사를 진행한다.
+onBus('paper:review_due', (event) => {
+  const paperId = event?.payload?.paperId;
+  if (paperId) runDuePaperReview(paperId);
+});
 
 export function reviewPaper(paper) {
   const society = PAPER_SOCIETIES[paper.targetSociety];

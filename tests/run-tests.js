@@ -18,7 +18,7 @@ globalThis.localStorage = {
 
 const { gameState, resetState } = await import('../gameState.js');
 const { recordDiscovery, getDiscovery } = await import('../discoverySystem.js');
-const { createPaperDraft, getPaperSuggestion, submitPaper } = await import('../paperSystem.js');
+const { createPaperDraft, getPaperSuggestion, submitPaper, runDuePaperReview } = await import('../paperSystem.js');
 const { applyForGrant, signContract, sellScroll, tickEconomyWeek } = await import('../economy.js');
 const { startExpedition } = await import('../expedition.js');
 const { advanceDay, enqueueEvent, getPendingEvents, consumeTime } = await import('../schedule.js');
@@ -238,7 +238,7 @@ const tests = [
     assert.equal(gameState.progression.unlockedCompounds.length, 0);
   }],
 
-  ['paper system drafts and accepts a basic society submission', () => {
+  ['paper submission defers review to the schedule queue (M8)', () => {
     resetAll();
     const analysis = makeAnalysis({ signature: 'sig_paper', instability: 18, grade: 'single_rune' });
     recordDiscovery(analysis);
@@ -254,12 +254,51 @@ const tests = [
     assert.ok(draft);
     assert.equal(gameState.papers.drafts.length, 1);
 
-    const review = submitPaper(draft.id);
-    assert.ok(review);
-    assert.equal(review.accepted, true);
-    assert.equal(gameState.papers.accepted.length, 1);
+    const submitted = submitPaper(draft.id);
+    assert.ok(submitted, 'submitPaper should return the paper');
+    assert.equal(submitted.status, 'submitted');
+    assert.equal(submitted.reviewDelayDays, 3, 'basic society should default to 3 day review delay');
+    assert.equal(gameState.papers.submitted.length, 1, 'paper sits in submitted before review fires');
+    assert.equal(gameState.papers.accepted.length, 0, 'no immediate accept');
+    assert.equal(gameState.papers.rejected.length, 0, 'no immediate reject');
+
+    const pending = getPendingEvents().filter((e) => e.type === 'paper:review_due');
+    assert.equal(pending.length, 1, 'a paper:review_due event must be enqueued');
+    assert.equal(pending[0].payload.paperId, submitted.id);
+
+    // 2일만 흘려서는 심사가 끝나지 않는다 (delay=3).
+    const partial = advanceDay(2);
+    assert.equal(partial.firedEvents.length, 0, 'review must not fire before delay elapses');
+    assert.equal(gameState.papers.accepted.length, 0);
+
+    // 1일 더 흐르면 review_due가 fire되고 paperSystem 리스너가 심사 마무리.
+    const final = advanceDay(1);
+    assert.equal(final.firedEvents.length, 1, 'review_due must fire on the 3rd day');
+    assert.equal(gameState.papers.submitted.length, 0, 'submitted is drained after review');
+    assert.equal(gameState.papers.accepted.length, 1, 'paper is moved to accepted after review fires');
     assert.equal(gameState.resources.degreeScore, 15);
     assert.equal(gameState.resources.researchFunds, 800);
+  }],
+
+  ['runDuePaperReview can force a review without waiting (M8)', () => {
+    resetAll();
+    const analysis = makeAnalysis({ signature: 'sig_force', instability: 18, grade: 'single_rune' });
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+
+    const draft = createPaperDraft({
+      discoverySignature: 'sig_force',
+      type: 'new_discovery',
+      targetSociety: 'basic_magic_society',
+    });
+    submitPaper(draft.id);
+    assert.equal(gameState.papers.submitted.length, 1);
+
+    const review = runDuePaperReview(draft.id);
+    assert.ok(review, 'runDuePaperReview should return the review object');
+    assert.equal(review.accepted, true);
+    assert.equal(gameState.papers.accepted.length, 1);
   }],
 
   ['paper draft preserves user-provided title and claim (M7 modal flow)', () => {
