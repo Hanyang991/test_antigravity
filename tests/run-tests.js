@@ -31,6 +31,7 @@ const { analyzeArrangement } = await import('../arrangement.js');
 const { analyzeBoneInteraction } = await import('../bone-interaction.js');
 const { analyzeMagic } = await import('../magicPipeline.js');
 const { RiftGame } = await import('../rift.js');
+const { AssignmentSystem } = await import('../assignmentSystem.js');
 
 function resetAll() {
   resetState();
@@ -422,6 +423,62 @@ const tests = [
     assert.equal(analysis._raw.boneInteraction.shape, 'triangle');
     assert.equal(analysis.legacy.meaning.includes('[관통]'), true);
     assert.equal(typeof analysis.observables.heat, 'number');
+  }],
+
+  ['assignment daily quest labels do not leak legacy answer names (blind mode §11)', () => {
+    resetAll();
+    const sys = new AssignmentSystem();
+    sys._generateDailyQuests();
+
+    const LEGACY_NAMES = [
+      '이사', '대지', '게보', '알기즈', '티와즈',
+      '하갈라즈', '에와즈', '열기', '나우디즈',
+      '라구즈', '케나즈', '다가즈',
+      '마그마', '폭발', '봉인된 태양',
+    ];
+
+    assert.ok(sys.dailyQuests.length > 0, 'expected at least one daily quest');
+
+    for (const quest of sys.dailyQuests) {
+      for (const legacy of LEGACY_NAMES) {
+        assert.ok(
+          !quest.label.includes(legacy),
+          `quest.label "${quest.label}" leaks legacy name "${legacy}"`
+        );
+      }
+    }
+
+    for (const legacy of LEGACY_NAMES) {
+      assert.ok(
+        !sys.message.includes(legacy),
+        `message "${sys.message}" leaks legacy name "${legacy}"`
+      );
+    }
+  }],
+
+  ['assignment cast miss message hides the legacy meaning of drawn rune (blind mode §11)', () => {
+    resetAll();
+    const sys = new AssignmentSystem();
+    sys.dailyQuests = [
+      { match: '이사(|)', label: 'Ⅰ — 수직 직선 1획', sketch: '', isStudy: false, done: false },
+    ];
+
+    const result = sys.cast({
+      meaning: '열기(△)',
+      compoundName: null,
+    });
+
+    assert.equal(result.result, 'miss');
+    assert.ok(!sys.message.includes('열기'), `miss message leaks "열기": ${sys.message}`);
+    assert.ok(!sys.message.includes('△'), `miss message leaks "△": ${sys.message}`);
+
+    const compoundResult = sys.cast({
+      meaning: '열기(△) + 대지(ㅡ)',
+      compoundName: '마그마',
+    });
+
+    assert.equal(compoundResult.result, 'miss');
+    assert.ok(!sys.message.includes('마그마'), `miss message leaks "마그마": ${sys.message}`);
   }],
 
   ['rift game rewards a correctly drawn rune cast', () => {
