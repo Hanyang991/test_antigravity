@@ -1187,25 +1187,27 @@ const tests = [
     assert.equal(review.classification.classification, 'known_disputed');
     assert.equal(review.canonPenaltyApplied, true);
 
-    // basic_magic_society base rewards: degreeScore=15, reputation=8, researchFunds=300.
-    // multiplier=0.4 → 6 / 3 / 120.
-    if (review.accepted) {
-      assert.ok(review.grantedRewards, 'grantedRewards must be present on accepted disputed paper');
-      assert.ok(
-        review.grantedRewards.degreeScore < 15,
-        `degreeScore reward must be reduced (<15), got ${review.grantedRewards.degreeScore}`,
-      );
-      assert.ok(
-        review.grantedRewards.researchFunds < 300,
-        `researchFunds reward must be reduced (<300), got ${review.grantedRewards.researchFunds}`,
-      );
-      assert.equal(gameState.resources.degreeScore, review.grantedRewards.degreeScore);
-      assert.equal(gameState.resources.researchFunds, 500 + review.grantedRewards.researchFunds);
-    }
+    // multiplier=0.7 → 잘 쓴 disputed paper 는 basic 학회 (acceptThreshold=60) 통과 가능.
+    // 위 reproduction 3회 + single_rune + instability=18 + new_discovery 조합의
+    // raw score 는 90 (=25+25+25+15). 0.7 곱 → 63 으로 60 통과.
+    assert.equal(review.accepted, true,
+      `disputed paper with raw=90 must pass basic acceptThreshold=60 after 0.7 multiplier (got score=${review.score})`);
+    assert.ok(review.score >= 60 && review.score < 90,
+      `disputed score must be reduced from raw 90 but >= 60, got ${review.score}`);
 
-    // 점수 자체도 깎였어야 함 — 같은 입력에서 페널티 없을 때 대비 60% 차감.
-    // (페널티 곱 0.4 → 차감률 60%)
-    assert.ok(review.score < 60, `disputed score must be cut below acceptThreshold range, got ${review.score}`);
+    // basic_magic_society base rewards: degreeScore=15, reputation=8, researchFunds=300.
+    // multiplier=0.7 → round(15*0.7)=11 / round(8*0.7)=6 / round(300*0.7)=210.
+    assert.ok(review.grantedRewards, 'grantedRewards must be present on accepted disputed paper');
+    assert.ok(
+      review.grantedRewards.degreeScore < 15,
+      `degreeScore reward must be reduced (<15), got ${review.grantedRewards.degreeScore}`,
+    );
+    assert.ok(
+      review.grantedRewards.researchFunds < 300,
+      `researchFunds reward must be reduced (<300), got ${review.grantedRewards.researchFunds}`,
+    );
+    assert.equal(gameState.resources.degreeScore, review.grantedRewards.degreeScore);
+    assert.equal(gameState.resources.researchFunds, 500 + review.grantedRewards.researchFunds);
   }],
 
   ['reviewPaper accepts new_discovery on unknown signature with full rewards (M7 PR-F)', () => {

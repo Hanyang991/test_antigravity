@@ -11,8 +11,11 @@ import { enqueueEvent } from './schedule.js';
 import { consumeForAction } from './actionCosts.js';
 
 // known_disputed 정설 위에 올라온 new_discovery 논문은 받되 점수와 보상을
-// 큰 폭으로 깎는다 (옵션 B). 기존 정설 검증의 미세 기여로 취급.
-const DISPUTED_CANON_PENALTY_MULTIPLIER = 0.4;
+// 차감한다 (옵션 B). 기존 정설 재검증의 부분 기여로 취급. 0.7은 잘 쓴
+// disputed paper 가 basic 학회 acceptThreshold(60)를 통과하면서 high(70)
+// 에는 못 닿는 수준 — raw 95 → final 67. 0.4 시절에는 사실상 hard-reject
+// 였어서 manual 검증 후 완화함.
+const DISPUTED_CANON_PENALTY_MULTIPLIER = 0.7;
 
 // 학회별 심사 지연 일수 — submitPaper 시점에서 N일 뒤 'paper:review_due' 이벤트가
 // fire 되어야 reviewPaper가 호출된다 (M8: 시간 흐름 기반 심사).
