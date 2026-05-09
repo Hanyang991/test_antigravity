@@ -1,6 +1,6 @@
 ---
 name: testing-arcane-sandbox
-description: How to run and end-to-end test the Arcane Sandbox app (Vite + canvas-based magic-rune sandbox). Use when verifying RUNE_DICTIONARY features (§2 radicals, §9 arrangement, §10 bone interaction, §§11-12 sentences) by drawing on the canvas via computer-use.
+description: How to run and end-to-end test the Arcane Sandbox app (Vite + canvas-based magic-rune sandbox). Use when verifying RUNE_DICTIONARY features (§2 radicals, §9 arrangement, §10 bone interaction, §§11-12 sentences) by drawing on the canvas via computer-use, OR when verifying DOM/UI bugs that don't need real rendering (use the jsdom harness fallback).
 ---
 
 # Testing Arcane Sandbox (test_antigravity)
@@ -19,6 +19,54 @@ Ad-hoc ESM harnesses (not in `package.json`):
 - `node /tmp/test_sentence.mjs` — sentence analyzer (§§11-12). 36 cases.
 
 They import directly from `/home/ubuntu/repos/test_antigravity/*.js` so paths must be absolute.
+
+## jsdom harness fallback (when Chrome won't start)
+
+Chrome may fail to start in the VM (immediate exit, no window). For DOM/UI bugs that don't need real CSS rendering — tab switching, button visibility, event handlers, gameState mutations — use a jsdom harness instead. The pattern that works:
+
+1. **Place the harness inside the repo** (e.g. `scratch/<name>.mjs`). jsdom is in the repo's `node_modules`, so a script in `/tmp/` will hit `ERR_MODULE_NOT_FOUND` for the bare `jsdom` specifier.
+2. **Install jsdom locally if missing**: `npm install --no-save jsdom` (lockfile stays clean).
+3. **Wire jsdom globals via `Object.defineProperty`, not direct assignment**. In modern Node, `globalThis.navigator` is read-only — direct assignment throws `TypeError: Cannot set property navigator of #<Object> which has only a getter`. Use a `wireGlobal(key, value)` helper that wraps `Object.defineProperty(globalThis, key, { configurable: true, writable: true, value })` in a try/catch. Skip `navigator` entirely if not needed by the modules under test.
+4. **DO NOT cache-bust dynamic imports with `?t=${Date.now()}`**. Within one Node run, ESM modules are cached by URL — using different cache-busting strings creates SEPARATE module instances. If the harness imports `gameState.js` and `labNotebook.js` (which itself imports `gameState.js`) with different cache busters, the harness's `gameState` reference will be a different object from the one the UI mutates. Symptom: the UI clearly worked (panel rendered, accepted++ in its copy) but the harness's `gameState.papers.accepted.length` reads as `0`. Drop the cache buster.
+5. **Load index.html with jsdom**, then dynamic-import the ESM modules in dependency order, then call init functions.
+
+Minimal harness skeleton (`scratch/<name>.mjs`):
+
+```js
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import { pathToFileURL } from 'url';
+import { JSDOM } from 'jsdom';
+
+const repoPath = process.argv[2] || process.cwd();
+const html = readFileSync(resolve(repoPath, 'index.html'), 'utf8');
+const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true });
+const { window } = dom;
+
+const wireGlobal = (k, v) => {
+  try { Object.defineProperty(globalThis, k, { configurable: true, writable: true, value: v }); }
+  catch { /* read-only in node — skip */ }
+};
+for (const k of ['window','document','localStorage','HTMLElement','Element','Node','Event','MouseEvent']) wireGlobal(k, window[k]);
+wireGlobal('requestAnimationFrame', cb => setTimeout(cb, 16));
+wireGlobal('cancelAnimationFrame', id => clearTimeout(id));
+
+const importFromRepo = rel => import(pathToFileURL(resolve(repoPath, rel)).href); // NO cache buster
+
+const { gameState } = await importFromRepo('gameState.js');
+const { initLabNotebook } = await importFromRepo('labNotebook.js');
+initLabNotebook();
+// ...drive events, assert DOM/state...
+```
+
+Run: `node scratch/<name>.mjs /home/ubuntu/repos/test_antigravity` (must run from inside the repo or with NODE_PATH pointing at it).
+
+**To prove a regression-fix isn't a placebo, run the same harness on `main` and on the fix branch.** A well-designed test case will FAIL on `main` with the symptom-level assertion (e.g. `display === 'block'` after tab click), then PASS on the fix branch.
+
+Limitations:
+
+- jsdom doesn't compute layout — only `style.display` from inline/style attrs. Real CSS rules in stylesheets are NOT applied. If the bug is a CSS layout/visual issue (z-index, flex collapse, theme color) jsdom won't catch it; need a real browser.
+- jsdom's canvas is a stub — for canvas-rendering bugs use computer-use with the real game.
 
 ## UI cheat sheet
 
@@ -42,12 +90,16 @@ They import directly from `/home/ubuntu/repos/test_antigravity/*.js` so paths mu
 배치 (Arrangement)       <label> ×<powerMul>     ← §9
   <arrangement-detail>
 너대 상호작용 (Bone)     <label> ×<powerMul>     ← §10
-  <bone-detail>                                  e.g. '단선 (─)', '먼에은 2.0회 감기'
+  <bone-detail>                                  e.g. '단선 (─)', '먼에은 2.0회 감기'
 문장 (Sentence)         <grade> ×<powerMul>     ← §11-12
   <sentence-detail>                              e.g. '절 · 투사 · S-V-O'
 ```
 
 Assertions should compare the EXACT panel string (e.g. `연결 ×0.9 / 단선 (─)`), not the raw values. Strings come from BRIDGE_TABLE, GRADE, DIRECTIONS in `bone-interaction.js` / `sentence.js`.
+
+## Archive panel id ↔ data-tab convention
+
+The archive tabs (`labNotebook.js`) use `data-tab="X"` and look up panels by id `X-panel`. Convention is **singular**: `notebook` / `library` / `paper` / `discoveries`. If a new tab is added, both must match — the panel id `paper-panel` requires the button to be `data-tab="paper"`, not `"papers"`. A mismatch sets the panel itself to `display: none` (because the tab-switch code hides every child whose id !== `${tab}-panel`), so nothing inside the panel shows up.
 
 ## How to draw via computer-use
 
