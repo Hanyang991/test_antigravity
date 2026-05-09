@@ -11,6 +11,7 @@ import { initAcademicCanon } from './academicCanon.js'
 import { renderAcademicUI } from './academicUI.js'
 import { initInbox } from './inboxSystem.js'
 import { playCast, playDrawStart, playRiftControl, playStrokeCommit, primeAudio } from './sound.js'
+import { formatCanvasStatus, formatCastInjection } from './magicStatusUi.js'
 
 const { bboxOfStrokes, clusterStrokesByProximity } = RECOGNITION_INTERNAL;
 
@@ -506,7 +507,9 @@ function castMagic() {
     }
     refreshRiftUI();
   } else {
-    systemStatus.innerText = `[마법 주입!] ${state.currentMeaning}이(가) 균열로 빨려들어갑니다!`;
+    // §11 블라인드: 정답명(`이사(|)`/`마그마` 등)을 직접 노출하지 않는다.
+    // 디버그 모드 키면 magicStatusUi가 정답명을 다시 붙여준다.
+    systemStatus.innerText = formatCastInjection(state, gameState.settings);
     systemStatus.style.color = '#fff';
     ctx.fillStyle = 'rgba(80, 60, 120, 0.5)';
     playCast('neutral');
@@ -1072,28 +1075,20 @@ function updateAnalyzerUI() {
   const hasLiveStroke = state.strokes.length > 0 || state.currentStroke.length > 0;
   const resonant = state.resonance > 30 && hasRune;
   const canCast = resonant || (riftActive && hasRune);
-  if (state.instability > 80) {
-    systemStatus.innerText = `[경고] 붕괴 임박! (${state.currentMeaning})`;
-    systemStatus.style.color = '#8b0000';
-    btnCastMagic.style.display = 'none';
-  } else if (state.currentCompound) {
-    const prefix = canCast ? '결합 발현' : '결합 감지';
-    systemStatus.innerText = `${prefix}: ${state.currentCompound} - ${state.currentDynamics}`;
-    systemStatus.style.color = compoundColor;
-    btnCastMagic.style.display = canCast ? 'block' : 'none';
-  } else if (canCast) {
-    systemStatus.innerText = `발현 중: ${state.currentMeaning} - ${state.currentDynamics}`;
-    systemStatus.style.color = '#8a2be2';
-    btnCastMagic.style.display = 'block';
-  } else if (hasLiveStroke) {
-    systemStatus.innerText = `분석 중: ${state.currentMeaning}`;
-    systemStatus.style.color = '#00ffff';
-    btnCastMagic.style.display = 'none';
-  } else {
-    systemStatus.innerText = '대기 중...';
-    systemStatus.style.color = '#8a2be2';
-    btnCastMagic.style.display = 'none';
-  }
+  // §11 블라인드: 분석 중·발현 중·결합 감지 등 모든 상태 텍스트는 정답명을
+  // 직접 띄우지 않고 관측값(불안정성·동역학 등)으로 표현한다. magicStatusUi가
+  // 분기별 색(compoundColor 포함)도 함께 돌려준다.
+  const status = formatCanvasStatus({
+    instability: state.instability,
+    currentMeaning: state.currentMeaning,
+    currentCompound: state.currentCompound,
+    currentDynamics: state.currentDynamics,
+    hasLiveStroke,
+    canCast,
+  }, gameState.settings);
+  systemStatus.innerText = status.text;
+  systemStatus.style.color = status.color;
+  btnCastMagic.style.display = status.showCast ? 'block' : 'none';
 }
 
 function runeStrokesCount() {
