@@ -24,6 +24,7 @@ const { startExpedition } = await import('../expedition.js');
 const { advanceDay, enqueueEvent, getPendingEvents, consumeTime } = await import('../schedule.js');
 const { on: onBus, off: offBus } = await import('../eventBus.js');
 const { checkPhaseProgress, takeMidtermExam, takeFinalExam } = await import('../phase.js');
+const { getCanonEntries } = await import('../academicCanon.js');
 const { analyzeConnectorLines } = await import('../connectorLine.js');
 const { analyzeGrammarTokens } = await import('../grammarTokens.js');
 const { analyzeSentence: analyzeSentenceStructure } = await import('../sentenceAnalyzer.js');
@@ -749,6 +750,155 @@ const tests = [
     } finally {
       globalThis.performance.now = originalNow;
     }
+  }],
+
+  ['paperSystem returns score and reviewerVoice for basic society (M7)', () => {
+    resetAll();
+    const analysis = makeAnalysis({ signature: 'sig_voice', instability: 18, grade: 'single_rune' });
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+
+    const draft = createPaperDraft({
+      discoverySignature: 'sig_voice',
+      type: 'new_discovery',
+      targetSociety: 'basic_magic_society',
+    });
+    const review = submitPaper(draft.id);
+    assert.equal(review.accepted, true);
+    assert.equal(typeof review.score, 'number');
+    assert.ok(review.score >= 60, `expected score >= acceptThreshold, got ${review.score}`);
+    assert.ok(review.score <= 100);
+    assert.equal(typeof review.reviewerVoice, 'string');
+    assert.ok(review.reviewerVoice.length > 0, 'reviewerVoice must be non-empty for accepted basic submission');
+  }],
+
+  ['canon data exposes 5+ entries spanning thermo/forbidden coverage (M7)', () => {
+    const entries = getCanonEntries();
+    assert.ok(entries.length >= 5, `expected at least 5 canon entries, got ${entries.length}`);
+    const ids = entries.map((c) => c.id);
+    assert.ok(ids.includes('canon_004'), 'canon_004 (서리 결정 정설) must be present');
+    assert.ok(ids.includes('canon_005'), 'canon_005 (심연 종소리 정설) must be present');
+    const c4 = entries.find((c) => c.id === 'canon_004');
+    assert.equal(c4.challengeable, true, 'canon_004 must be challengeable');
+    const c5 = entries.find((c) => c.id === 'canon_005');
+    assert.equal(c5.discoveredBy, '금서 마법 학회');
+  }],
+
+  ['challenge paper accepted on high society writes canon override (M7)', () => {
+    resetAll();
+    const sig = 'sig_canon_challenge';
+    // 10회 재현된 sentence-grade 발견을 만들어 high society 가산점 확보
+    const analysis = makeAnalysis({ signature: sig, instability: 30, grade: 'sentence', rawSentenceGrade: '문장' });
+    recordDiscovery(analysis);
+    for (let i = 0; i < 11; i++) recordDiscovery(analysis);
+    assert.ok(getDiscovery(sig).reproducibility.count >= 10);
+
+    // 정설 미스매치를 직접 주입 (academicCanon 분석 경로를 우회)
+    gameState.academic.canonMismatches.push({
+      id: `mismatch_canon_004_${sig}`,
+      canonId: 'canon_004',
+      canonTitle: '서리 결정 정설',
+      canonOfficialName: '서리 결정',
+      signature: sig,
+      discoverySignature: sig,
+      reasons: ['dynamics mismatch'],
+      actualObservables: { dynamics: '냉각', instabilityBand: 30 },
+      message: 'test mismatch',
+      createdAt: Date.now(),
+    });
+
+    const draft = createPaperDraft({
+      discoverySignature: sig,
+      type: 'challenge',
+      targetSociety: 'high_magic_society',
+      title: '서리 결정 정설 반박',
+    });
+    const review = submitPaper(draft.id);
+
+    assert.equal(review.accepted, true, `expected accept; got reasons=${JSON.stringify(review.reasons)} score=${review.score}`);
+    assert.ok(review.canonOverride, 'canonOverride must be recorded on accepted challenge');
+    assert.equal(review.canonOverride.canonId, 'canon_004');
+    assert.equal(gameState.academic.canonOverrides['canon_004'].overriddenByTitle, '서리 결정 정설 반박');
+    assert.equal(review.reviewerVoice.length > 0, true);
+  }],
+
+  ['challenge paper to high society falls into disputed when score is mid-range (M7)', () => {
+    resetAll();
+    const sig = 'sig_disputed';
+    // 5회 재현 sentence-grade — high society 점수가 60점 부근으로 acceptThreshold 70 미달, rejectThreshold 45 초과
+    const analysis = makeAnalysis({ signature: sig, instability: 30, grade: 'sentence', rawSentenceGrade: '문장' });
+    for (let i = 0; i < 5; i++) recordDiscovery(analysis);
+
+    gameState.academic.canonMismatches.push({
+      id: `mismatch_canon_005_${sig}`,
+      canonId: 'canon_005',
+      canonTitle: '심연 종소리 정설',
+      canonOfficialName: '심연 종소리',
+      signature: sig,
+      discoverySignature: sig,
+      reasons: ['dynamics mismatch'],
+      actualObservables: { dynamics: '냉각', instabilityBand: 30 },
+      message: 'test mismatch',
+      createdAt: Date.now(),
+    });
+
+    const draft = createPaperDraft({
+      discoverySignature: sig,
+      type: 'challenge',
+      targetSociety: 'high_magic_society',
+    });
+
+    let disputedFired = null;
+    const handler = (e) => { disputedFired = e; };
+    onBus('paper:disputed', handler);
+
+    const review = submitPaper(draft.id);
+
+    assert.equal(review.accepted, false);
+    assert.equal(review.disputed, true, `expected disputed; got score=${review.score} reasons=${JSON.stringify(review.reasons)}`);
+    assert.ok(review.score >= 45 && review.score < 70, `disputed score must be mid-range, got ${review.score}`);
+    assert.equal(gameState.papers.disputes.length, 1);
+    assert.equal(gameState.papers.disputes[0].status, 'disputed');
+    assert.equal(gameState.papers.accepted.length, 0);
+    assert.equal(gameState.papers.rejected.length, 0);
+    assert.ok(disputedFired, 'paper:disputed event must fire');
+    assert.ok(!gameState.academic.canonOverrides['canon_005'], 'no override should be written for disputed challenge');
+
+    offBus('paper:disputed', handler);
+  }],
+
+  ['basic society rejects challenge paper via hard gate (M7)', () => {
+    resetAll();
+    const sig = 'sig_basic_challenge';
+    const analysis = makeAnalysis({ signature: sig, instability: 18, grade: 'single_rune' });
+    for (let i = 0; i < 5; i++) recordDiscovery(analysis);
+
+    gameState.academic.canonMismatches.push({
+      id: `mismatch_canon_001_${sig}`,
+      canonId: 'canon_001',
+      canonTitle: '봉인된 달 정설',
+      canonOfficialName: '봉인된 달',
+      signature: sig,
+      discoverySignature: sig,
+      reasons: ['dynamics mismatch'],
+      actualObservables: {},
+      message: 'test mismatch',
+      createdAt: Date.now(),
+    });
+
+    const draft = createPaperDraft({
+      discoverySignature: sig,
+      type: 'challenge',
+      targetSociety: 'basic_magic_society',
+    });
+    const review = submitPaper(draft.id);
+
+    assert.equal(review.accepted, false);
+    assert.equal(review.disputed, false, 'hard-gate rejection must not become disputed');
+    assert.equal(review.score, 0);
+    assert.ok(review.reasons.some((r) => r.includes('도전 논문')), `expected hard-gate reason, got ${JSON.stringify(review.reasons)}`);
+    assert.equal(gameState.papers.rejected.length, 1);
   }],
 ];
 

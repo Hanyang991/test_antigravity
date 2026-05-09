@@ -158,64 +158,62 @@ onBus('paper:review_due', (event) => {
   if (paperId) runDuePaperReview(paperId);
 });
 
+/**
+ * 학회별 심사. 점수(score)와 결과(accepted/disputed/rejected)를 함께 반환한다.
+ *
+ * 결과 분기:
+ *   - 하드 게이트(Phase 미달, 학회가 받지 않는 type 등) 위반 → reject
+ *   - score >= acceptThreshold                              → accept
+ *   - score >= rejectThreshold AND (challenge|refinement)   → disputed (재논의 큐)
+ *   - 그 외                                                  → reject
+ *
+ * 반환 값:
+ *   { accepted, disputed, score, reasons, society, reviewerVoice, canonOverride }
+ */
 export function reviewPaper(paper) {
   const society = PAPER_SOCIETIES[paper.targetSociety];
-  const evidence = paper.evidence;
-  const reasons = [];
-  let accepted = false;
-
   if (!society) {
-    return { accepted: false, reasons: ['알 수 없는 학회입니다.'] };
+    return {
+      accepted: false,
+      disputed: false,
+      score: 0,
+      reasons: ['알 수 없는 학회입니다.'],
+      society: null,
+      reviewerVoice: '',
+      canonOverride: null,
+    };
   }
 
-  switch (paper.targetSociety) {
-    case 'basic_magic_society':
-      accepted = true;
-      if (evidence.reproductionCount < 3) {
-        accepted = false;
-        reasons.push('재현 횟수 3회 미만');
-      }
-      if (evidence.averageInstability > 50) {
-        accepted = false;
-        reasons.push(`불안정성 50% 초과 (현재 ${evidence.averageInstability}%)`);
-      }
-      if (!['single_rune', 'compound_word', 'phrase'].includes(evidence.sentenceGrade)) {
-        accepted = false;
-        reasons.push('기초 학회는 단일 룬이나 단순 단어만 심사합니다.');
-      }
-      if (paper.type === 'challenge') {
-        accepted = false;
-        reasons.push('도전 논문은 접수하지 않습니다.');
-      }
-      break;
-    case 'thermodynamic_magic_society':
-      accepted =
-        evidence.reproductionCount >= 5 &&
-        (evidence.averageHeat > 0 || evidence.averageInstability > 0) &&
-        evidence.materialsTested.length >= 2;
-      if (!accepted) reasons.push('열역학 학회는 2개 이상 바탕재 재현과 5회 이상 재현을 요구합니다.');
-      break;
-    case 'high_magic_society':
-      accepted =
-        evidence.reproductionCount >= 10 &&
-        (evidence.sentenceGrade === 'sentence' || evidence.sentenceGrade === 'incantation' || paper.type === 'challenge');
-      if (!accepted) reasons.push('고위 학회는 문장급 이상 또는 도전 논문과 10회 재현을 요구합니다.');
-      break;
-    case 'forbidden_magic_society':
-      accepted =
-        gameState.progression.currentPhase >= 3 &&
-        evidence.sentenceGrade === 'incantation' &&
-        evidence.averageInstability >= 70;
-      if (!accepted) reasons.push('금서 학회는 Phase 3 이상과 주문급 불안정성을 요구합니다.');
-      break;
-    default:
-      reasons.push('학회 심사 규칙이 없습니다.');
+  const evidence = paper.evidence || {};
+  const hardGate = evaluateHardGate(paper, society);
+  if (!hardGate.ok) {
+    return {
+      accepted: false,
+      disputed: false,
+      score: 0,
+      reasons: hardGate.reasons,
+      society,
+      reviewerVoice: society.reviewerVoice?.rejected || '',
+      canonOverride: null,
+    };
   }
+
+  const scored = scoreReview(paper, society, evidence);
+  const accepted = scored.score >= society.acceptThreshold;
+  const challengesCanon = paper.type === 'challenge' || paper.type === 'refinement';
+  const disputed = !accepted && challengesCanon && scored.score >= society.rejectThreshold;
+
+  const outcomeKey = accepted ? 'accepted' : disputed ? 'disputed' : 'rejected';
+  const reviewerVoice = society.reviewerVoice?.[outcomeKey] || '';
 
   return {
     accepted,
-    reasons,
+    disputed,
+    score: scored.score,
+    reasons: scored.reasons,
     society,
+    reviewerVoice,
+    canonOverride: null,
   };
 }
 
@@ -226,8 +224,23 @@ function finalizePaperReview(paper, review) {
     paper.status = 'accepted';
     paper.review = review;
     gameState.papers.accepted.unshift(paper);
+
+    if (paper.type === 'challenge' || paper.type === 'refinement') {
+      const override = recordCanonOverride(paper, review);
+      if (override) review.canonOverride = override;
+    }
+
     applyRewards(review.society.rewards);
     emit('paper:accepted', { paper, review });
+    return;
+  }
+
+  if (review.disputed) {
+    paper.status = 'disputed';
+    paper.review = review;
+    if (!Array.isArray(gameState.papers.disputes)) gameState.papers.disputes = [];
+    gameState.papers.disputes.unshift(paper);
+    emit('paper:disputed', { paper, review });
     return;
   }
 
@@ -235,6 +248,122 @@ function finalizePaperReview(paper, review) {
   paper.review = review;
   gameState.papers.rejected.unshift(paper);
   emit('paper:rejected', { paper, review });
+}
+
+function recordCanonOverride(paper, review) {
+  const mismatch = getMismatchForSignature(paper.discoverySignature);
+  if (!mismatch || !mismatch.canonId) return null;
+
+  if (!gameState.academic.canonOverrides || typeof gameState.academic.canonOverrides !== 'object') {
+    gameState.academic.canonOverrides = {};
+  }
+
+  const override = {
+    canonId: mismatch.canonId,
+    canonTitle: mismatch.canonTitle,
+    overriddenBy: paper.id,
+    overriddenByTitle: paper.title,
+    replacedBySignature: paper.discoverySignature,
+    societyId: review.society?.id || null,
+    overriddenAt: {
+      week: gameState.progression.currentWeek,
+      day: gameState.progression.currentDay,
+    },
+    score: review.score,
+  };
+  gameState.academic.canonOverrides[mismatch.canonId] = override;
+  emit('canon:overridden', override);
+  return override;
+}
+
+function evaluateHardGate(paper, society) {
+  const reasons = [];
+
+  if (paper.type === 'challenge' && !society.challengeable) {
+    reasons.push(`${society.name}는 도전 논문을 받지 않습니다.`);
+  }
+
+  if (society.id === 'forbidden_magic_society' && gameState.progression.currentPhase < 3) {
+    reasons.push('금서 학회는 Phase 3 이상에서만 접수합니다.');
+  }
+
+  if (society.id === 'basic_magic_society') {
+    const grade = paper.evidence?.sentenceGrade || 'single_rune';
+    if (!['single_rune', 'compound_word', 'phrase'].includes(grade)) {
+      reasons.push('기초 학회는 단일 룬·복합어·구 등급만 심사합니다.');
+    }
+  }
+
+  return { ok: reasons.length === 0, reasons };
+}
+
+/**
+ * 학회별 채점 루브릭 (0~100). thresholds 는 paperReviewData.js 에 정의된다.
+ */
+function scoreReview(paper, society, evidence) {
+  const repro = evidence.reproductionCount || 0;
+  const grade = evidence.sentenceGrade || 'single_rune';
+  const instability = evidence.averageInstability || 0;
+  const heat = evidence.averageHeat || 0;
+  const materials = Array.isArray(evidence.materialsTested) ? evidence.materialsTested.length : 0;
+
+  const reasons = [];
+  let score = 0;
+
+  switch (society.id) {
+    case 'basic_magic_society': {
+      score += scoreReproBand(repro, [3, 5, 10], [25, 30, 35]);
+      score += ['single_rune', 'compound_word', 'phrase'].includes(grade) ? 25 : 0;
+      score += instability <= 50 ? 25 : Math.max(0, 25 - (instability - 50));
+      score += paper.type === 'new_discovery' || paper.type === 'refinement' ? 15 : 0;
+      if (repro < 3) reasons.push('재현 횟수 3회 미만');
+      if (instability > 50) reasons.push(`불안정성 50% 초과 (현재 ${instability}%)`);
+      break;
+    }
+    case 'thermodynamic_magic_society': {
+      score += scoreReproBand(repro, [3, 5, 10], [15, 25, 35]);
+      score += materials >= 2 ? 25 : materials === 1 ? 10 : 0;
+      score += heat > 0 || instability > 0 ? 20 : 0;
+      score += grade === 'phrase' || grade === 'sentence' || grade === 'incantation' ? 15 : 0;
+      if (repro < 5) reasons.push('재현 표본 5회 권장');
+      if (materials < 2) reasons.push('바탕재 2종 이상 권장');
+      break;
+    }
+    case 'high_magic_society': {
+      score += scoreReproBand(repro, [5, 10, 15], [15, 30, 40]);
+      score += grade === 'sentence' || grade === 'incantation' ? 30 : 0;
+      score += paper.type === 'challenge' ? 15 : paper.type === 'sentence_formula' ? 10 : 0;
+      if (repro < 10) reasons.push('재현 10회 권장');
+      if (grade !== 'sentence' && grade !== 'incantation' && paper.type !== 'challenge') {
+        reasons.push('문장급 이상 또는 도전 논문 권장');
+      }
+      break;
+    }
+    case 'forbidden_magic_society': {
+      score += scoreReproBand(repro, [3, 5, 8], [10, 20, 30]);
+      score += grade === 'incantation' ? 35 : grade === 'sentence' ? 15 : 0;
+      score += instability >= 70 ? 30 : instability >= 50 ? 15 : 0;
+      score += paper.type === 'forbidden' || paper.type === 'challenge' ? 10 : 0;
+      if (grade !== 'incantation') reasons.push('주문급(incantation) 등급 필요');
+      if (instability < 70) reasons.push('불안정성 70 이상 권장');
+      break;
+    }
+    default:
+      reasons.push('학회 채점 루브릭이 없습니다.');
+  }
+
+  return {
+    score: Math.max(0, Math.min(100, Math.round(score))),
+    reasons,
+  };
+}
+
+function scoreReproBand(repro, thresholds, points) {
+  let earned = 0;
+  for (let i = 0; i < thresholds.length; i++) {
+    if (repro >= thresholds[i]) earned = points[i];
+  }
+  return earned;
 }
 
 function applyRewards(rewards) {
