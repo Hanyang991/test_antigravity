@@ -764,7 +764,9 @@ const tests = [
       type: 'new_discovery',
       targetSociety: 'basic_magic_society',
     });
-    const review = submitPaper(draft.id);
+    submitPaper(draft.id);
+    const review = runDuePaperReview(draft.id);
+    assert.ok(review, 'review must be produced after submission');
     assert.equal(review.accepted, true);
     assert.equal(typeof review.score, 'number');
     assert.ok(review.score >= 60, `expected score >= acceptThreshold, got ${review.score}`);
@@ -814,7 +816,9 @@ const tests = [
       targetSociety: 'high_magic_society',
       title: '서리 결정 정설 반박',
     });
-    const review = submitPaper(draft.id);
+    submitPaper(draft.id);
+    const review = runDuePaperReview(draft.id);
+    assert.ok(review, 'review must be produced after submission');
 
     assert.equal(review.accepted, true, `expected accept; got reasons=${JSON.stringify(review.reasons)} score=${review.score}`);
     assert.ok(review.canonOverride, 'canonOverride must be recorded on accepted challenge');
@@ -853,7 +857,9 @@ const tests = [
     const handler = (e) => { disputedFired = e; };
     onBus('paper:disputed', handler);
 
-    const review = submitPaper(draft.id);
+    submitPaper(draft.id);
+    const review = runDuePaperReview(draft.id);
+    assert.ok(review, 'review must be produced after submission');
 
     assert.equal(review.accepted, false);
     assert.equal(review.disputed, true, `expected disputed; got score=${review.score} reasons=${JSON.stringify(review.reasons)}`);
@@ -892,7 +898,9 @@ const tests = [
       type: 'challenge',
       targetSociety: 'basic_magic_society',
     });
-    const review = submitPaper(draft.id);
+    submitPaper(draft.id);
+    const review = runDuePaperReview(draft.id);
+    assert.ok(review, 'review must be produced after submission');
 
     assert.equal(review.accepted, false);
     assert.equal(review.disputed, false, 'hard-gate rejection must not become disputed');
