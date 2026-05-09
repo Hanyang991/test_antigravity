@@ -25,6 +25,7 @@ const { advanceDay, enqueueEvent, getPendingEvents, consumeTime } = await import
 const { on: onBus, off: offBus } = await import('../eventBus.js');
 const { checkPhaseProgress, takeMidtermExam, takeFinalExam } = await import('../phase.js');
 const { getCanonEntries } = await import('../academicCanon.js');
+const { ACTION_COSTS, consumeForAction } = await import('../actionCosts.js');
 const { analyzeConnectorLines } = await import('../connectorLine.js');
 const { analyzeGrammarTokens } = await import('../grammarTokens.js');
 const { analyzeSentence: analyzeSentenceStructure } = await import('../sentenceAnalyzer.js');
@@ -907,6 +908,127 @@ const tests = [
     assert.equal(review.score, 0);
     assert.ok(review.reasons.some((r) => r.includes('도전 논문')), `expected hard-gate reason, got ${JSON.stringify(review.reasons)}`);
     assert.equal(gameState.papers.rejected.length, 1);
+  }],
+
+  ['ACTION_COSTS exposes positive day costs for paper / grant / contract / scroll (M8)', () => {
+    assert.equal(typeof ACTION_COSTS, 'object');
+    assert.ok(ACTION_COSTS.createPaperDraft >= 1, 'createPaperDraft must consume >= 1 day');
+    assert.ok(ACTION_COSTS.applyForGrant >= 1, 'applyForGrant must consume >= 1 day');
+    assert.ok(ACTION_COSTS.signContract >= 1, 'signContract must consume >= 1 day');
+    assert.ok(ACTION_COSTS.sellScroll >= 1, 'sellScroll must consume >= 1 day');
+    assert.equal(ACTION_COSTS.submitPaper, 0, 'submitPaper must be free since review queue handles its own delay');
+  }],
+
+  ['consumeForAction(unknown) is a no-op and returns 0 days (M8)', () => {
+    resetAll();
+    const startWeek = gameState.progression.currentWeek;
+    const startDay = gameState.progression.currentDay;
+    const consumed = consumeForAction('this_action_does_not_exist');
+    assert.equal(consumed, 0);
+    assert.equal(gameState.progression.currentWeek, startWeek);
+    assert.equal(gameState.progression.currentDay, startDay);
+  }],
+
+  ['createPaperDraft consumes ACTION_COSTS.createPaperDraft days and dispatches due events (M8)', () => {
+    resetAll();
+    const analysis = makeAnalysis({ signature: 'sig_paper_time', instability: 18, grade: 'single_rune' });
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+
+    const startDayIndex = (gameState.progression.currentWeek - 1) * 7 + gameState.progression.currentDay;
+
+    const fired = [];
+    const handler = (e) => fired.push(e.payload?.tag);
+    onBus('lecture:scheduled', handler);
+    enqueueEvent({ delayDays: 1, type: 'lecture:scheduled', payload: { tag: 'within_draft' } });
+    enqueueEvent({ delayDays: ACTION_COSTS.createPaperDraft + 5, type: 'lecture:scheduled', payload: { tag: 'after_draft' } });
+
+    const draft = createPaperDraft({
+      discoverySignature: 'sig_paper_time',
+      type: 'new_discovery',
+      targetSociety: 'basic_magic_society',
+    });
+
+    const endDayIndex = (gameState.progression.currentWeek - 1) * 7 + gameState.progression.currentDay;
+    assert.equal(endDayIndex - startDayIndex, ACTION_COSTS.createPaperDraft,
+      `createPaperDraft must advance ${ACTION_COSTS.createPaperDraft} days, advanced ${endDayIndex - startDayIndex}`);
+    assert.equal(draft.timeConsumed, ACTION_COSTS.createPaperDraft);
+    assert.deepEqual(fired, ['within_draft'], 'queued event within draft window must fire; the later event must wait');
+
+    offBus('lecture:scheduled', handler);
+  }],
+
+  ['applyForGrant / signContract / sellScroll each consume time and report timeConsumed (M8)', () => {
+    resetAll();
+    const startDayIndex = (gameState.progression.currentWeek - 1) * 7 + gameState.progression.currentDay;
+
+    const grantResult = applyForGrant('grant_foundation_basic');
+    assert.equal(grantResult.ok, true);
+    assert.equal(grantResult.timeConsumed, ACTION_COSTS.applyForGrant);
+
+    const contractResult = signContract('contract_barrier_maintenance');
+    assert.equal(contractResult.ok, true);
+    assert.equal(contractResult.timeConsumed, ACTION_COSTS.signContract);
+
+    const analysis = makeAnalysis({ signature: 'sig_scroll_time', instability: 15, resonance: 30, grade: 'phrase' });
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    const sold = sellScroll('sig_scroll_time', analysis);
+    assert.equal(sold.ok, true);
+    assert.equal(sold.timeConsumed, ACTION_COSTS.sellScroll);
+
+    const endDayIndex = (gameState.progression.currentWeek - 1) * 7 + gameState.progression.currentDay;
+    const expected = ACTION_COSTS.applyForGrant + ACTION_COSTS.signContract + ACTION_COSTS.sellScroll;
+    assert.equal(endDayIndex - startDayIndex, expected,
+      `combined economy actions must advance ${expected} days, advanced ${endDayIndex - startDayIndex}`);
+  }],
+
+  ['Phase 5 promotion unlocks voidstone material and canon registration ability (M8)', () => {
+    resetAll();
+    gameState.progression.currentPhase = 4;
+    gameState.resources.degreeScore = 800;
+    gameState.papers.accepted = Array.from({ length: 14 }, (_, i) => ({ id: `p${i}` }));
+    gameState.discoveries.bySignature = Object.fromEntries(
+      Array.from({ length: 16 }, (_, i) => [`sig_${i}`, { signature: `sig_${i}` }])
+    );
+    gameState.discoveries.recentSignatures = Object.keys(gameState.discoveries.bySignature);
+    gameState.progression.exams = { midtermPassed: true, finalPassed: true };
+
+    const phase5Events = [];
+    const phaseHandler = (e) => phase5Events.push(e);
+    onBus('phase:advanced', phaseHandler);
+
+    const result = checkPhaseProgress();
+    assert.equal(result.promoted, true);
+    assert.equal(result.phase, 5);
+    assert.deepEqual(result.abilities, ['register_canon']);
+    assert.equal(gameState.progression.currentPhase, 5);
+    assert.equal(gameState.progression.canRegisterCanon, true);
+    assert.ok(gameState.progression.unlockedMaterials.includes('voidstone'),
+      `voidstone must unlock at Phase 5; got ${JSON.stringify(gameState.progression.unlockedMaterials)}`);
+    assert.equal(phase5Events.length, 1);
+    assert.deepEqual(phase5Events[0].abilities, ['register_canon']);
+
+    offBus('phase:advanced', phaseHandler);
+  }],
+
+  ['Phase 5 promotion is gated by full requirement set (M8)', () => {
+    resetAll();
+    gameState.progression.currentPhase = 4;
+    // 점수만 충족, 논문/발견 부족
+    gameState.resources.degreeScore = 800;
+    gameState.papers.accepted = [{ id: 'p1' }];
+    gameState.discoveries.bySignature = { only_one: {} };
+    gameState.discoveries.recentSignatures = ['only_one'];
+    gameState.progression.exams = { midtermPassed: true, finalPassed: true };
+
+    const result = checkPhaseProgress();
+    assert.equal(result.promoted, false);
+    assert.equal(gameState.progression.currentPhase, 4);
+    assert.notEqual(gameState.progression.canRegisterCanon, true,
+      'canRegisterCanon must remain false until Phase 5 promotion');
   }],
 ];
 
