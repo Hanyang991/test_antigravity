@@ -295,8 +295,10 @@ function refreshDictionaryList() {
   const list = document.getElementById('dictionary-list');
   if (!list) return;
 
-  const unlocked = gameState.progression.unlockedRunes || [];
-  if (unlocked.length === 0) {
+  const unlockedRunes = gameState.progression.unlockedRunes || [];
+  const unlockedCompounds = gameState.progression.unlockedCompounds || [];
+
+  if (unlockedRunes.length === 0 && unlockedCompounds.length === 0) {
     list.innerHTML = `
       <div style="grid-column: 1 / -1; color: #666; font-size: 0.8rem; text-align: center; padding: 20px 0;">
         아직 해금된 룬이 없습니다.<br>지도교수의 과제를 완료하여 도감을 채우세요.
@@ -305,7 +307,7 @@ function refreshDictionaryList() {
     return;
   }
 
-  list.innerHTML = unlocked.map(runeName => `
+  const runeCardsHtml = unlockedRunes.map(runeName => `
     <div style="
       background: rgba(20, 10, 40, 0.8);
       border: 1px solid rgba(0, 200, 100, 0.4);
@@ -319,6 +321,24 @@ function refreshDictionaryList() {
       ${runeName}
     </div>
   `).join('');
+
+  const compoundCardsHtml = unlockedCompounds.map(name => `
+    <div style="
+      background: rgba(40, 20, 60, 0.85);
+      border: 1px solid rgba(220, 140, 60, 0.55);
+      border-radius: 6px;
+      padding: 12px 8px;
+      text-align: center;
+      color: #ffd9a8;
+      font-size: 0.85rem;
+      box-shadow: 0 0 10px rgba(220, 140, 60, 0.15);
+    ">
+      <div style="font-size:0.6rem; color:#c89a5a; margin-bottom:2px; letter-spacing:0.4px;">복합</div>
+      ${name}
+    </div>
+  `).join('');
+
+  list.innerHTML = runeCardsHtml + compoundCardsHtml;
 }
 
 function refreshNotebookList() {

@@ -196,6 +196,47 @@ const tests = [
     assert.equal(entry.reproducibility.count, 2);
   }],
 
+  ['compound rune dictionary unlocks after 3 reproductions (M6)', () => {
+    resetAll();
+    const analysis = makeAnalysis({
+      signature: 'sig_compound_unlock',
+      meaning: '열기(△) + 대지(ㅡ)',
+      compoundName: '마그마',
+      grade: 'compound_word',
+    });
+
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    const third = recordDiscovery(analysis);
+
+    assert.equal(third.entry.reproducibility.count, 3);
+    assert.equal(third.entry.status, 'reproducible');
+
+    const compounds = gameState.progression.unlockedCompounds;
+    assert.ok(Array.isArray(compounds), 'unlockedCompounds must be an array');
+    assert.ok(compounds.includes('마그마'), `expected '마그마' in unlockedCompounds, got ${JSON.stringify(compounds)}`);
+
+    // 단일 룬 도감엔 들어가지 않아야 함
+    assert.ok(!gameState.progression.unlockedRunes.includes('열기(△) + 대지(ㅡ)'),
+      'compound discoveries must not pollute unlockedRunes');
+
+    // 4번째 재현해도 중복 추가되지 않아야 함
+    recordDiscovery(analysis);
+    const occurrences = compounds.filter((c) => c === '마그마').length;
+    assert.equal(occurrences, 1, 'compound name must not be duplicated on further reproductions');
+  }],
+
+  ['single rune dictionary unlock still works alongside compound unlock (M6)', () => {
+    resetAll();
+    const single = makeAnalysis({ signature: 'sig_single_unlock', meaning: '이사(|)', grade: 'single_rune' });
+    recordDiscovery(single);
+    recordDiscovery(single);
+    recordDiscovery(single);
+
+    assert.ok(gameState.progression.unlockedRunes.includes('이사(|)'));
+    assert.equal(gameState.progression.unlockedCompounds.length, 0);
+  }],
+
   ['paper system drafts and accepts a basic society submission', () => {
     resetAll();
     const analysis = makeAnalysis({ signature: 'sig_paper', instability: 18, grade: 'single_rune' });
