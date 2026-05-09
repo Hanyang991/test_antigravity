@@ -71,6 +71,11 @@ export const gameState = {
     messages: [],
   },
 
+  schedule: {
+    events: [],
+    lastDayIndex: 0,
+  },
+
   settings: {
     blindDiscovery: true,
     debugShowLegacyNames: false,
@@ -115,6 +120,7 @@ export function resetState() {
     economy: { activeGrants: [], activeContracts: [], scrollOrders: [], weeklyIncome: [] },
     academic: { canonOverrides: {}, canonMismatches: [], npcRelations: {}, citations: [] },
     inbox: { messages: [] },
+    schedule: { events: [], lastDayIndex: 0 },
     settings: { blindDiscovery: true, debugShowLegacyNames: false, autosave: true },
   };
   deepMerge(gameState, fresh);
