@@ -32,28 +32,106 @@ export function getMismatchForSignature(signature) {
   return getCanonMismatches().find((item) => item.signature === signature) || null;
 }
 
+/**
+ * 정설 힌트가 매칭된 발견을 조회한다. 매칭 시점에 항상 기록되므로
+ * 관측값이 정설과 일치하는 케이스도 잡힌다.
+ * @param {string} signature
+ * @returns {{ canonId: string, observed: 'consistent'|'inconsistent', recordedAt: number } | null}
+ */
+export function getCanonMatchForSignature(signature) {
+  const matches = gameState.academic.canonMatches;
+  if (!matches || typeof matches !== 'object') return null;
+  return matches[signature] || null;
+}
+
+/**
+ * 발견을 정설과 비교해 분류한다.
+ *
+ *   - 'unknown'         : 정설 힌트와 매칭된 적 없음 → 신규 발견 가능
+ *   - 'known_correct'   : 정설 힌트 매칭 + canon.isCorrect=true + 관측값 일치
+ *                         → 신규 발견(new_discovery) 하드 거절 대상
+ *   - 'known_disputed'  : 정설 힌트 매칭 + (canon.isCorrect=false 또는 관측값 충돌)
+ *                         → 신규 발견은 점수/보상 차감 후 수락 (옵션 B),
+ *                           도전(challenge)/보완(refinement) 가능
+ *
+ * @param {string} signature
+ * @returns {{ classification: 'unknown'|'known_correct'|'known_disputed', canon: Object|null, reason: string }}
+ */
+export function classifyDiscoveryAgainstCanon(signature) {
+  const match = getCanonMatchForSignature(signature);
+  if (!match) {
+    return { classification: 'unknown', canon: null, reason: '' };
+  }
+
+  const canon = CANON_DATA.find((c) => c.id === match.canonId) || null;
+  if (!canon) {
+    return { classification: 'unknown', canon: null, reason: '' };
+  }
+
+  const hasMismatch = getMismatchForSignature(signature) !== null;
+  const canonIsKnownWrong = canon.isCorrect === false;
+
+  if (hasMismatch || canonIsKnownWrong) {
+    const reason = hasMismatch
+      ? `관측값이 ${canon.discoveredBy} ${canon.year}년 정설(${canon.title})과 충돌함`
+      : `${canon.title}는 학계 내부에서도 의문이 제기되는 정설임`;
+    return { classification: 'known_disputed', canon, reason };
+  }
+
+  return {
+    classification: 'known_correct',
+    canon,
+    reason: `이미 ${canon.discoveredBy} ${canon.year}년 정설(${canon.title})로 등재된 현상`,
+  };
+}
+
 export function inspectCanonMismatch(analysis) {
   if (!analysis) return null;
 
   const candidates = CANON_DATA.filter((canon) => matchesCanonHint(analysis, canon));
   if (candidates.length === 0) return null;
 
+  let firstMismatch = null;
+
   for (const canon of candidates) {
     const mismatch = buildMismatchIfNeeded(analysis, canon);
+    recordCanonMatch(analysis, canon, mismatch ? 'inconsistent' : 'consistent');
+
     if (!mismatch) continue;
 
     const exists = getCanonMismatches().some(
       (entry) => entry.canonId === mismatch.canonId && entry.signature === mismatch.signature,
     );
-    if (exists) return mismatch;
+    if (exists) {
+      if (!firstMismatch) firstMismatch = mismatch;
+      continue;
+    }
 
     gameState.academic.canonMismatches.push(mismatch);
     emit('canon:mismatch', mismatch);
     saveGame();
-    return mismatch;
+    if (!firstMismatch) firstMismatch = mismatch;
   }
 
-  return null;
+  return firstMismatch;
+}
+
+function recordCanonMatch(analysis, canon, observed) {
+  const signature = analysis.discovery?.signature;
+  if (!signature) return;
+  if (!gameState.academic.canonMatches || typeof gameState.academic.canonMatches !== 'object') {
+    gameState.academic.canonMatches = {};
+  }
+  const existing = gameState.academic.canonMatches[signature];
+  // 일관성이 한 번이라도 깨진 적이 있으면 보존(observed='inconsistent' 가 우선).
+  if (existing && existing.canonId === canon.id && existing.observed === 'inconsistent') {
+    return;
+  }
+  gameState.academic.canonMatches[signature] = {
+    canonId: canon.id,
+    observed,
+    recordedAt: Date.now(),
+  };
 }
 
 function matchesCanonHint(analysis, canon) {

@@ -65,6 +65,13 @@ export const gameState = {
   academic: {
     canonOverrides: {},
     canonMismatches: [],
+    /**
+     * signature → { canonId, observed: 'consistent' | 'inconsistent', recordedAt }
+     * 정설 힌트가 매칭되면 항상 기록된다. classifyDiscoveryAgainstCanon이
+     * 이 슬롯과 canonMismatches/canon.isCorrect 를 조합해 known_correct /
+     * known_disputed / unknown 을 판단한다.
+     */
+    canonMatches: {},
     npcRelations: {},
     citations: [],
   },
@@ -120,7 +127,7 @@ export function resetState() {
     papers: { drafts: [], submitted: [], accepted: [], rejected: [], disputes: [] },
     expeditions: { active: [], completed: [], unlockedSiteIds: [] },
     economy: { activeGrants: [], activeContracts: [], scrollOrders: [], weeklyIncome: [] },
-    academic: { canonOverrides: {}, canonMismatches: [], npcRelations: {}, citations: [] },
+    academic: { canonOverrides: {}, canonMismatches: [], canonMatches: {}, npcRelations: {}, citations: [] },
     inbox: { messages: [] },
     schedule: { events: [], lastDayIndex: 0 },
     settings: { blindDiscovery: true, debugShowLegacyNames: false, autosave: true },
