@@ -74,6 +74,14 @@ export const gameState = {
     canonMatches: {},
     npcRelations: {},
     citations: [],
+    // PR-J: NPC 학회지 논문 반박 누적 카운터.
+    failedRebuttals: 0,
+    successfulRebuttals: 0,
+  },
+
+  // PR-J: 학회지 NPC 논문 게재/반박 진행 상태.
+  publications: {
+    entries: {},
   },
 
   inbox: {
@@ -127,7 +135,8 @@ export function resetState() {
     papers: { drafts: [], submitted: [], accepted: [], rejected: [], disputes: [] },
     expeditions: { active: [], completed: [], unlockedSiteIds: [] },
     economy: { activeGrants: [], activeContracts: [], scrollOrders: [], weeklyIncome: [] },
-    academic: { canonOverrides: {}, canonMismatches: [], canonMatches: {}, npcRelations: {}, citations: [] },
+    academic: { canonOverrides: {}, canonMismatches: [], canonMatches: {}, npcRelations: {}, citations: [], failedRebuttals: 0, successfulRebuttals: 0 },
+    publications: { entries: {} },
     inbox: { messages: [] },
     schedule: { events: [], lastDayIndex: 0 },
     settings: { blindDiscovery: true, debugShowLegacyNames: false, autosave: true },

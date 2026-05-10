@@ -13,6 +13,7 @@ import { on } from './eventBus.js';
 import { getAllDiscoveries, nameDiscovery } from './discoverySystem.js';
 import { getCanonMismatches, classifyDiscoveryAgainstCanon, registerCanon } from './academicCanon.js';
 import { createPaperDraft, getEligiblePaperPlans, getPaperSuggestion, getSocieties, submitPaper } from './paperSystem.js';
+import { getActivePublications, submitRebuttal } from './societyPublications.js';
 import { getExpeditionSites, startExpedition } from './expedition.js';
 import { applyForGrant, getGrantOffers, getContractOffers, sellScroll, signContract } from './economy.js';
 import { advanceDay } from './schedule.js';
@@ -428,8 +429,9 @@ function refreshPaperList() {
 
   const accepted = gameState.papers.accepted;
   const rejected = gameState.papers.rejected;
+  const publications = getActivePublications();
 
-  if (eligible.length === 0 && accepted.length === 0 && rejected.length === 0) {
+  if (eligible.length === 0 && accepted.length === 0 && rejected.length === 0 && publications.length === 0) {
     list.innerHTML = `
       <p style="color: #666; font-size: 0.8rem; text-align: center; padding: 20px 0;">
         아직 제출 가능한 논문이 없습니다.<br>현상을 3회 이상 재현해 보세요.
@@ -466,8 +468,10 @@ function refreshPaperList() {
   }).join('');
 
   const resultHtml = renderPaperHistory(accepted, rejected, mismatches);
+  const publicationsHtml = renderPublicationsSection(publications);
 
   list.innerHTML = `
+    ${publicationsHtml}
     ${eligibleHtml || ''}
     ${resultHtml}
   `;
@@ -489,6 +493,97 @@ function refreshPaperList() {
   list.querySelectorAll('.paper-register-canon').forEach((button) => {
     button.addEventListener('click', () => handleRegisterCanonClick(button.dataset.paperId));
   });
+
+  // PR-J: 학회지 NPC 논문에 대한 반박 버튼.
+  list.querySelectorAll('.publication-rebut').forEach((button) => {
+    button.addEventListener('click', () => handleRebutPublicationClick(button.dataset.publicationId));
+  });
+}
+
+// PR-J: 활성 NPC 학회지 논문 섹션. 각 카드 = abstract + 반박 버튼.
+function renderPublicationsSection(publications) {
+  const failed = gameState.academic?.failedRebuttals || 0;
+  const succeeded = gameState.academic?.successfulRebuttals || 0;
+  const counterHtml = (failed > 0 || succeeded > 0)
+    ? `<div style="color:#7ebadf; font-size:0.66rem; margin-top:2px;">반박 누적: 정확 ${succeeded} / 오반박 ${failed}</div>`
+    : '';
+
+  if (publications.length === 0) {
+    return `
+      <div style="margin-bottom:10px;">
+        <div style="color:#8fd4ff; font-size:0.74rem; font-family:var(--font-data, monospace);">학회지 NPC 논문</div>
+        ${counterHtml}
+        <div style="color:#666; font-size:0.72rem; padding:6px 0;">현재 출간된 NPC 논문이 없습니다.</div>
+      </div>
+    `;
+  }
+
+  const cards = publications.map(({ template, entry }) => {
+    const releasedWeek = entry?.releasedAt?.week ?? template.releaseWeek;
+    return `
+      <div class="publication-card" style="
+        background: rgba(20, 30, 50, 0.78);
+        border: 1px solid rgba(120, 180, 230, 0.3);
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin-bottom: 8px;
+      ">
+        <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
+          <span style="color:#cfe2ff; font-size:0.82rem; font-weight:600;">${escapeHtml(template.title)}</span>
+          <span style="color:#7ebadf; font-size:0.66rem;">${releasedWeek}주차</span>
+        </div>
+        <div style="color:#9bb6cf; font-size:0.7rem; margin-top:2px;">
+          ${escapeHtml(template.author)} · ${escapeHtml(getSocietyDisplayName(template.society))}
+        </div>
+        <div style="color:#b9d4ec; font-size:0.7rem; margin-top:4px; line-height:1.4;">
+          ${escapeHtml(template.abstract)}
+        </div>
+        <div style="display:flex; justify-content:flex-end; margin-top:6px;">
+          <button class="publication-rebut" data-publication-id="${escapeHtml(template.id)}"
+            title="반박 (5일 소모 · 사실에 부합하는 논문이면 학위·평판 손실)"
+            style="
+              background: rgba(220, 110, 110, 0.14);
+              border: 1px solid rgba(220, 110, 110, 0.45);
+              border-radius: 4px;
+              color: #ffd0d0;
+              font-size: 0.7rem;
+              padding: 4px 10px;
+              cursor: pointer;
+              font-family: var(--font-text, system-ui), sans-serif;
+            ">반박 (5일)</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div style="margin-bottom:10px;">
+      <div style="color:#8fd4ff; font-size:0.74rem; font-family:var(--font-data, monospace);">학회지 NPC 논문 (${publications.length})</div>
+      ${counterHtml}
+      ${cards}
+    </div>
+  `;
+}
+
+function getSocietyDisplayName(societyId) {
+  const society = getSocieties().find((s) => s.id === societyId);
+  return society?.name || societyId;
+}
+
+function handleRebutPublicationClick(publicationId) {
+  if (!publicationId) return;
+  const result = submitRebuttal(publicationId);
+  if (!result.ok) {
+    showToast(`반박 실패: ${result.reason}`, 'warn', 4000);
+    return;
+  }
+  if (result.outcome === 'wrongful') {
+    showToast(`오반박 — 학위 ${result.deltas.degreeScore} / 평판 ${result.deltas.reputation}`, 'warn', 5000);
+  } else {
+    showToast(`반박 채택 — 학위 +${result.deltas.degreeScore} / 평판 +${result.deltas.reputation} / ${result.deltas.researchFunds}G`, 'paper', 5000);
+  }
+  refreshPaperList();
+  refreshResourceHUD();
 }
 
 function openPaperDraftModal({ signature, type, targetSociety }) {

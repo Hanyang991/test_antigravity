@@ -21,6 +21,9 @@ export const ACTION_COSTS = {
   signContract: 1,
   sellScroll: 1,
   registerCanon: 5,
+  // PR-J: NPC 학회지 논문에 대한 반박 게시. 반박은 즉시 결과(채택 또는 오반박)
+  // 가 결정되지만 결과를 학계에 알리는 데 5일이 소비된다 — registerCanon 과 동일.
+  submitRebuttal: 5,
   castMagic: 0,
 };
 

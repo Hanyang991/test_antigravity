@@ -186,6 +186,52 @@ export function buildMailFromEvent(kind, payload) {
         ].join('\n'),
       };
     }
+    // PR-J: 학회지 NPC 논문 출간 알림.
+    case 'publication:released': {
+      const { publication, society } = payload;
+      const societyName = society?.name || publication.society;
+      return {
+        sender: societyName,
+        senderRole: 'society',
+        subject: `[학회지] ${publication.title}`,
+        kind: 'announcement',
+        body: [
+          `${societyName} 회지가 새 논문을 게재했습니다.`,
+          '',
+          `제목: ${publication.title}`,
+          `저자: ${publication.author}`,
+          '',
+          publication.abstract,
+          '',
+          '학회지 패널에서 본문을 확인하고 필요 시 반박 논문을 제출할 수 있습니다.',
+          '※ 이미 학계에서 사실로 인정된 논문을 잘못 반박할 경우 학위·평판이 손상될 수 있습니다.',
+        ].join('\n'),
+      };
+    }
+    // PR-J: 반박 결과 통보.
+    case 'publication:rebutted': {
+      const { publication, society, outcome, deltas } = payload;
+      const societyName = society?.name || publication.society;
+      const isWrongful = outcome === 'wrongful';
+      const deltaSummary = `학위 ${deltas.degreeScore >= 0 ? '+' : ''}${deltas.degreeScore} / 평판 ${deltas.reputation >= 0 ? '+' : ''}${deltas.reputation} / 연구비 ${deltas.researchFunds >= 0 ? '+' : ''}${deltas.researchFunds}G`;
+      return {
+        sender: societyName,
+        senderRole: 'society',
+        subject: isWrongful
+          ? `[오반박] ${publication.title}`
+          : `[정확한 반박] ${publication.title}`,
+        kind: 'review',
+        body: [
+          `${societyName} 편집위원회입니다.`,
+          '',
+          isWrongful
+            ? `귀하는 사실에 부합하는 ${publication.author}의 논문을 잘못 반박했습니다. 이는 학내 신뢰도에 부정적으로 작용합니다.`
+            : `귀하의 반박이 ${publication.author}의 부정확한 논문을 학계 앞에 노출시켰습니다. 본 학회는 귀하의 기여를 채택합니다.`,
+          '',
+          `결과: ${deltaSummary}`,
+        ].join('\n'),
+      };
+    }
     default:
       return null;
   }
