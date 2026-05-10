@@ -11,7 +11,7 @@
 import { gameState } from './gameState.js';
 import { on } from './eventBus.js';
 import { getAllDiscoveries, nameDiscovery } from './discoverySystem.js';
-import { getCanonMismatches } from './academicCanon.js';
+import { getCanonMismatches, classifyDiscoveryAgainstCanon } from './academicCanon.js';
 import { createPaperDraft, getEligiblePaperPlans, getPaperSuggestion, getSocieties, submitPaper } from './paperSystem.js';
 import { getExpeditionSites, startExpedition } from './expedition.js';
 import { applyForGrant, getGrantOffers, getContractOffers, sellScroll, signContract } from './economy.js';
@@ -454,6 +454,7 @@ function refreshPaperList() {
           <span style="color:#7ebadf; font-size:0.68rem;">재현 ${plan.discovery.reproducibility.count}회</span>
         </div>
         ${plan.mismatch ? `<div style="margin-top:6px;color:#ffcc88;font-size:0.72rem;">정설 불일치: ${plan.mismatch.canonOfficialName}</div>` : ''}
+        ${renderClassificationBadge(plan.classification)}
         <div style="display:grid; grid-template-columns: 1fr 1fr auto; gap:6px; margin-top:8px;">
           <select class="paper-type" style="${selectStyle()}">${types}</select>
           <select class="paper-society" style="${selectStyle()}">${societyOptions}</select>
@@ -497,6 +498,7 @@ function openPaperDraftModal({ signature, type, targetSociety }) {
   const society = getSocieties().find((s) => s.id === targetSociety) || { name: targetSociety };
   const evidence = suggestion.evidence;
   const discoveryName = suggestion.discovery.playerName || '미확인 현상';
+  const classification = classifyDiscoveryAgainstCanon(signature);
 
   const overlay = document.createElement('div');
   overlay.id = 'paper-draft-modal';
@@ -530,6 +532,7 @@ function openPaperDraftModal({ signature, type, targetSociety }) {
         <div>제출 학회: <span style="color:#fff;">${escapeHtml(society.name)}</span></div>
         <div>논문 유형: <span style="color:#fff;">${escapeHtml(type)}</span></div>
       </div>
+      ${renderModalClassificationWarning(classification, type)}
 
       <div style="
         background: rgba(0,0,0,0.25);
@@ -731,18 +734,8 @@ function refreshExpeditionList() {
 }
 
 function renderPaperHistory(accepted, rejected, mismatches) {
-  const acceptedHtml = accepted.slice(0, 4).map((paper) => `
-    <div style="padding:6px 0; border-top:1px solid rgba(255,255,255,0.08);">
-      <div style="color:#a8ffd1; font-size:0.78rem;">수락: ${paper.title}</div>
-      <div style="color:#7aa18b; font-size:0.68rem;">${paper.review?.society?.name || ''}</div>
-    </div>
-  `).join('');
-  const rejectedHtml = rejected.slice(0, 4).map((paper) => `
-    <div style="padding:6px 0; border-top:1px solid rgba(255,255,255,0.08);">
-      <div style="color:#ffb6b6; font-size:0.78rem;">반려: ${paper.title}</div>
-      <div style="color:#b68c8c; font-size:0.68rem;">${(paper.review?.reasons || []).join(' / ')}</div>
-    </div>
-  `).join('');
+  const acceptedHtml = accepted.slice(0, 4).map((paper) => renderReviewedCard(paper, 'accepted')).join('');
+  const rejectedHtml = rejected.slice(0, 4).map((paper) => renderReviewedCard(paper, 'rejected')).join('');
   const mismatchHtml = mismatches.slice(0, 3).map((item) => `
     <div style="padding:6px 0; border-top:1px solid rgba(255,255,255,0.08);">
       <div style="color:#ffcc88; font-size:0.78rem;">도전 후보: ${item.canonOfficialName}</div>
@@ -758,6 +751,129 @@ function renderPaperHistory(accepted, rejected, mismatches) {
       ${mismatchHtml}
     </div>
   `;
+}
+
+// PR-H: review 결과 카드. score(0–100) 배지 + 학회 + 사유 + classification
+// 페널티 표시 + canonOverride 등재 노트 + reviewer voice 인용 + grantedRewards.
+function renderReviewedCard(paper, kind) {
+  const review = paper.review || {};
+  const score = typeof review.score === 'number' ? review.score : null;
+  const societyName = review.society?.name || '';
+  const reasons = review.reasons || [];
+  const accepted = kind === 'accepted';
+  const titleColor = accepted ? '#a8ffd1' : '#ffb6b6';
+  const subColor = accepted ? '#7aa18b' : '#b68c8c';
+  const labelText = accepted ? '수락' : '반려';
+
+  const scoreBadge = score !== null
+    ? `<span style="
+        background: ${accepted ? 'rgba(80, 180, 130, 0.18)' : 'rgba(220, 110, 110, 0.18)'};
+        border: 1px solid ${accepted ? 'rgba(80, 180, 130, 0.4)' : 'rgba(220, 110, 110, 0.4)'};
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-size: 0.66rem;
+        font-family: var(--font-data, monospace);
+        color: ${accepted ? '#b8ffd9' : '#ffd0d0'};
+        margin-left: 6px;
+      ">${score}/100</span>`
+    : '';
+
+  const penaltyBadge = review.canonPenaltyApplied
+    ? `<span style="
+        background: rgba(255, 170, 60, 0.16);
+        border: 1px solid rgba(255, 170, 60, 0.4);
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-size: 0.66rem;
+        color: #ffd58a;
+        margin-left: 6px;
+      ">정설 검증 -30%</span>`
+    : '';
+
+  const overrideHtml = review.canonOverride
+    ? `<div style="color:#9fffe1;font-size:0.68rem;margin-top:2px;">정설 갱신: "${escapeHtml(review.canonOverride.canonTitle || '')}" 가 본 논문으로 대체됨</div>`
+    : '';
+
+  const voiceHtml = review.reviewerVoice
+    ? `<div style="color:#a9c5e0;font-size:0.66rem;margin-top:2px;font-style:italic;">— ${escapeHtml(review.reviewerVoice)}</div>`
+    : '';
+
+  const rewardsHtml = accepted && review.grantedRewards
+    ? `<div style="color:#9adfb8;font-size:0.66rem;margin-top:2px;">보상 ${formatRewards(review.grantedRewards)}</div>`
+    : '';
+
+  const reasonHtml = reasons.length
+    ? `<div style="color:${subColor};font-size:0.68rem;">${escapeHtml(reasons[reasons.length - 1])}</div>`
+    : '';
+
+  return `
+    <div style="padding:6px 0; border-top:1px solid rgba(255,255,255,0.08);">
+      <div style="color:${titleColor}; font-size:0.78rem;">
+        ${labelText}: ${escapeHtml(paper.title)}${scoreBadge}${penaltyBadge}
+      </div>
+      ${societyName ? `<div style="color:${subColor}; font-size:0.68rem;">${escapeHtml(societyName)}</div>` : ''}
+      ${reasonHtml}
+      ${overrideHtml}
+      ${rewardsHtml}
+      ${voiceHtml}
+    </div>
+  `;
+}
+
+function renderClassificationBadge(classification) {
+  if (!classification || classification.classification !== 'known_disputed') return '';
+  const canonTitle = classification.canon?.title || '기존 정설';
+  return `
+    <div style="
+      margin-top:6px;
+      padding:4px 8px;
+      background: rgba(255, 170, 60, 0.10);
+      border: 1px solid rgba(255, 170, 60, 0.32);
+      border-radius: 4px;
+      color: #ffd58a;
+      font-size: 0.7rem;
+    ">정설 검증 후보 — ${escapeHtml(canonTitle)} (new_discovery 시 점수·보상 30% 차감)</div>
+  `;
+}
+
+function renderModalClassificationWarning(classification, type) {
+  if (!classification) return '';
+  const cls = classification.classification;
+  const canonTitle = classification.canon?.title || '';
+
+  if (cls === 'known_correct' && type === 'new_discovery') {
+    return `
+      <div style="
+        margin-bottom:12px; padding:8px 10px;
+        background: rgba(220, 80, 80, 0.14);
+        border: 1px solid rgba(220, 80, 80, 0.4);
+        border-radius: 4px;
+        font-size: 0.72rem; color: #ffb6b6;
+      ">⚠ 이미 "${escapeHtml(canonTitle)}" 로 등재된 정설입니다. 신규 발견 등재가 즉시 거절됩니다.</div>
+    `;
+  }
+
+  if (cls === 'known_disputed' && type === 'new_discovery') {
+    return `
+      <div style="
+        margin-bottom:12px; padding:8px 10px;
+        background: rgba(255, 170, 60, 0.10);
+        border: 1px solid rgba(255, 170, 60, 0.4);
+        border-radius: 4px;
+        font-size: 0.72rem; color: #ffd58a;
+      ">⚠ "${escapeHtml(canonTitle)}" 와 매칭됩니다. 신규 발견으로 제출하면 점수·보상 30% 차감 (도전·보완 논문은 페널티 없음).</div>
+    `;
+  }
+
+  return '';
+}
+
+function formatRewards(rewards) {
+  const parts = [];
+  if (rewards.degreeScore) parts.push(`학위 ${rewards.degreeScore}`);
+  if (rewards.reputation) parts.push(`평판 ${rewards.reputation}`);
+  if (rewards.researchFunds) parts.push(`연구비 ${rewards.researchFunds}G`);
+  return parts.join(' · ') || '없음';
 }
 
 function openNamingInline(card, signature) {
@@ -1282,14 +1398,17 @@ function handlePaperSubmitted() {
   updatePaperBadge();
 }
 
-function handlePaperAccepted({ paper }) {
-  showToast(`논문 수락: "${paper.title}"`, 'paper', 4500);
+function handlePaperAccepted({ paper, review }) {
+  const score = typeof review?.score === 'number' ? ` (${review.score}점)` : '';
+  const penalty = review?.canonPenaltyApplied ? ' — 정설 검증 -30%' : '';
+  showToast(`논문 수락: "${paper.title}"${score}${penalty}`, 'paper', 4500);
   refreshResourceHUD();
   updatePaperBadge();
 }
 
 function handlePaperRejected({ paper, review }) {
-  showToast(`논문 반려: ${(review.reasons || ['심사 기준 미달']).join(' / ')}`, 'warn', 4500);
+  const score = typeof review?.score === 'number' ? `[${review.score}점] ` : '';
+  showToast(`논문 반려: ${score}${(review.reasons || ['심사 기준 미달']).join(' / ')}`, 'warn', 4500);
   updatePaperBadge();
 }
 
