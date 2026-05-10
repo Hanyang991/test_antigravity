@@ -2,6 +2,18 @@ import { CANON_DATA } from './data/canonData.js';
 import { gameState } from './gameState.js';
 import { on, emit } from './eventBus.js';
 import { saveGame } from './saveLoad.js';
+import { consumeForAction } from './actionCosts.js';
+
+/**
+ * Phase 5 능력 'register_canon' 이 해금된 후 도전·보완 논문 수락분에 대해
+ * 본인 이름으로 정설을 갱신할 때 즉시 지급되는 자원 보상.
+ * 학회별 논문 보상과 별개의 capstone 보상이며, multiplier 적용 대상이 아니다.
+ */
+export const REGISTER_CANON_REWARDS = {
+  degreeScore: 50,
+  reputation: 20,
+  researchFunds: 500,
+};
 
 let initialized = false;
 
@@ -83,6 +95,89 @@ export function classifyDiscoveryAgainstCanon(signature) {
     canon,
     reason: `이미 ${canon.discoveredBy} ${canon.year}년 정설(${canon.title})로 등재된 현상`,
   };
+}
+
+/**
+ * Phase 5 의 `register_canon` 능력으로, 이미 수락된 도전·보완 논문(challenge/refinement)에
+ * 대해 플레이어 이름으로 정설을 등재한다.
+ *
+ * 전제:
+ *   - paper.status === 'accepted' 이고 papers.accepted 에 존재
+ *   - paper.type === 'challenge' || 'refinement'
+ *   - paper.review.canonOverride 가 채워져 있음 (mismatch 가 있던 도전 논문 수락분)
+ *   - gameState.progression.canRegisterCanon === true (Phase 5 도달)
+ *   - 같은 canonId 슬롯에 registered=true 가 아직 박히지 않았음 (멱등)
+ *
+ * 효과:
+ *   - canonOverrides 슬롯에 registered/registeredAt/registeredByPaper/newOfficialName 추가
+ *   - paper.review.canonOverride 에도 같은 정보 동기화 (UI 가 review 객체만 봐도 알 수 있게)
+ *   - REGISTER_CANON_REWARDS 즉시 지급 (학위 50 / 평판 20 / 연구비 500G)
+ *   - 'canon:registered' 이벤트 발행
+ *   - actionCosts.registerCanon (5일) 만큼 schedule.consumeTime 호출
+ *
+ * @param {string} paperId
+ * @returns {{ ok: true, override, rewards, timeConsumed } | { ok: false, reason: string }}
+ */
+export function registerCanon(paperId) {
+  if (!gameState.progression?.canRegisterCanon) {
+    return { ok: false, reason: '석학(Phase 5) 진입 후에만 정설 등재가 가능합니다.' };
+  }
+
+  const paper = gameState.papers?.accepted?.find((p) => p.id === paperId);
+  if (!paper) {
+    return { ok: false, reason: '수락된 논문을 찾을 수 없습니다.' };
+  }
+
+  if (paper.type !== 'challenge' && paper.type !== 'refinement') {
+    return { ok: false, reason: '도전·보완 논문만 정설 등재 대상입니다.' };
+  }
+
+  const override = paper.review?.canonOverride;
+  if (!override || !override.canonId) {
+    return { ok: false, reason: '갱신 대상 정설이 없습니다.' };
+  }
+
+  if (!gameState.academic.canonOverrides || typeof gameState.academic.canonOverrides !== 'object') {
+    gameState.academic.canonOverrides = {};
+  }
+  const slot = gameState.academic.canonOverrides[override.canonId];
+  if (slot?.registered) {
+    return { ok: false, reason: '이미 등재된 정설입니다.' };
+  }
+
+  const registeredAt = {
+    week: gameState.progression.currentWeek,
+    day: gameState.progression.currentDay,
+  };
+  const enrichment = {
+    registered: true,
+    registeredAt,
+    registeredByPaper: paper.id,
+    registeredByAuthor: paper.authorName || '플레이어',
+    newOfficialName: paper.title,
+  };
+  if (slot) Object.assign(slot, enrichment);
+  else gameState.academic.canonOverrides[override.canonId] = { ...override, ...enrichment };
+  Object.assign(override, enrichment);
+
+  gameState.resources.degreeScore += REGISTER_CANON_REWARDS.degreeScore;
+  gameState.resources.reputation += REGISTER_CANON_REWARDS.reputation;
+  gameState.resources.researchFunds += REGISTER_CANON_REWARDS.researchFunds;
+
+  emit('canon:registered', {
+    paper,
+    canonId: override.canonId,
+    override,
+    rewards: REGISTER_CANON_REWARDS,
+  });
+
+  saveGame();
+
+  // 시간 비용은 emit + save 후에 적용 — schedule.consumeTime 이 도중에
+  // paper:review_due / expedition:return 큐를 dispatch 해도 등재 자체는 이미 커밋됨.
+  const timeConsumed = consumeForAction('registerCanon');
+
+  return { ok: true, override, rewards: REGISTER_CANON_REWARDS, timeConsumed };
 }
 
 export function inspectCanonMismatch(analysis) {

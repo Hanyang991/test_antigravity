@@ -11,7 +11,7 @@
 import { gameState } from './gameState.js';
 import { on } from './eventBus.js';
 import { getAllDiscoveries, nameDiscovery } from './discoverySystem.js';
-import { getCanonMismatches, classifyDiscoveryAgainstCanon } from './academicCanon.js';
+import { getCanonMismatches, classifyDiscoveryAgainstCanon, registerCanon } from './academicCanon.js';
 import { createPaperDraft, getEligiblePaperPlans, getPaperSuggestion, getSocieties, submitPaper } from './paperSystem.js';
 import { getExpeditionSites, startExpedition } from './expedition.js';
 import { applyForGrant, getGrantOffers, getContractOffers, sellScroll, signContract } from './economy.js';
@@ -46,6 +46,7 @@ export function initLabNotebook() {
   on('paper:submitted', handlePaperSubmitted);
   on('paper:accepted', handlePaperAccepted);
   on('paper:rejected', handlePaperRejected);
+  on('canon:registered', handleCanonRegistered);
   on('expedition:started', handleExpeditionStarted);
   on('expedition:completed', handleExpeditionCompleted);
   on('economy:grantAccepted', handleEconomyUpdate);
@@ -483,6 +484,11 @@ function refreshPaperList() {
       });
     });
   });
+
+  // PR-I: 수락된 도전/보완 논문 카드의 "정설 등재" 버튼 바인딩.
+  list.querySelectorAll('.paper-register-canon').forEach((button) => {
+    button.addEventListener('click', () => handleRegisterCanonClick(button.dataset.paperId));
+  });
 }
 
 function openPaperDraftModal({ signature, type, targetSociety }) {
@@ -806,6 +812,8 @@ function renderReviewedCard(paper, kind) {
     ? `<div style="color:${subColor};font-size:0.68rem;">${escapeHtml(reasons[reasons.length - 1])}</div>`
     : '';
 
+  const registerCanonHtml = accepted ? renderRegisterCanonControl(paper, review) : '';
+
   return `
     <div style="padding:6px 0; border-top:1px solid rgba(255,255,255,0.08);">
       <div style="color:${titleColor}; font-size:0.78rem;">
@@ -816,8 +824,68 @@ function renderReviewedCard(paper, kind) {
       ${overrideHtml}
       ${rewardsHtml}
       ${voiceHtml}
+      ${registerCanonHtml}
     </div>
   `;
+}
+
+// PR-I: 수락된 도전/보완 논문에 대해 Phase 5 능력으로 정설을 등재하는
+// 컨트롤. canRegisterCanon=false 이면 disabled, 이미 등재되었으면 완료 배지로 전환.
+function renderRegisterCanonControl(paper, review) {
+  if (paper.type !== 'challenge' && paper.type !== 'refinement') return '';
+  const override = review?.canonOverride;
+  if (!override) return '';
+
+  if (override.registered) {
+    const author = override.registeredByAuthor || '플레이어';
+    return `
+      <div style="
+        margin-top:4px;
+        padding:4px 8px;
+        background: rgba(150, 220, 255, 0.10);
+        border: 1px solid rgba(150, 220, 255, 0.32);
+        border-radius: 4px;
+        color: #cfe9ff;
+        font-size: 0.68rem;
+      ">★ 정설 등재 완료 — ${escapeHtml(author)} 명의로 "${escapeHtml(override.newOfficialName || override.canonTitle || '')}" 등재</div>
+    `;
+  }
+
+  const canRegister = !!gameState.progression?.canRegisterCanon;
+  const tooltip = canRegister
+    ? '정설 등재 (5일 소모 · 학위+50 / 평판+20 / 연구비+500G)'
+    : '석학(Phase 5) 진입 이후 공개됨';
+  const cursor = canRegister ? 'pointer' : 'not-allowed';
+  const opacity = canRegister ? '1' : '0.55';
+  return `
+    <div style="margin-top:6px;">
+      <button class="paper-register-canon" data-paper-id="${escapeHtml(paper.id)}"
+        ${canRegister ? '' : 'disabled'}
+        title="${tooltip}"
+        style="
+          background: rgba(150, 220, 255, 0.14);
+          border: 1px solid rgba(150, 220, 255, 0.4);
+          border-radius: 4px;
+          color: #cfe9ff;
+          font-size: 0.7rem;
+          padding: 4px 8px;
+          cursor: ${cursor};
+          opacity: ${opacity};
+          font-family: var(--font-text, system-ui), sans-serif;
+        ">★ 정설 등재 (5일)</button>
+    </div>
+  `;
+}
+
+function handleRegisterCanonClick(paperId) {
+  if (!paperId) return;
+  const result = registerCanon(paperId);
+  if (!result.ok) {
+    showToast(`정설 등재 실패: ${result.reason}`, 'warn', 4000);
+    return;
+  }
+  refreshPaperList();
+  refreshResourceHUD();
 }
 
 function renderClassificationBadge(classification) {
@@ -1409,6 +1477,16 @@ function handlePaperAccepted({ paper, review }) {
 function handlePaperRejected({ paper, review }) {
   const score = typeof review?.score === 'number' ? `[${review.score}점] ` : '';
   showToast(`논문 반려: ${score}${(review.reasons || ['심사 기준 미달']).join(' / ')}`, 'warn', 4500);
+  updatePaperBadge();
+}
+
+function handleCanonRegistered({ paper, override, rewards }) {
+  const newName = override?.newOfficialName || paper?.title || '정설';
+  const reward = rewards
+    ? ` (+학위 ${rewards.degreeScore} / +평판 ${rewards.reputation} / +연구비 ${rewards.researchFunds}G)`
+    : '';
+  showToast(`★ 정설 등재: "${newName}"${reward}`, 'discovery', 5500);
+  refreshResourceHUD();
   updatePaperBadge();
 }
 
