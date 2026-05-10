@@ -167,8 +167,13 @@ export function submitRebuttal(publicationId) {
         : `${tpl.author}의 "${tpl.title}" 는 사실과 다른 논문이었습니다. 학회는 귀하의 반박을 채택합니다.`,
     ],
     society,
+    // 반박 전용 voice 키를 우선 사용. 데이터에 키가 없는 학회는 generic
+    // accepted/rejected 로 fallback — 일반 논문 심사용 voice 가 그대로 들리지만
+    // 적어도 빈 문자열은 아니다.
     reviewerVoice:
-      society?.reviewerVoice?.[tpl.truthful ? 'rejected' : 'accepted'] || '',
+      society?.reviewerVoice?.[tpl.truthful ? 'rebuttal_wrongful' : 'rebuttal_accepted']
+      || society?.reviewerVoice?.[tpl.truthful ? 'rejected' : 'accepted']
+      || '',
     canonOverride: null,
     classification: null,
     canonPenaltyApplied: false,
