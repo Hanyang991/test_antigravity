@@ -34,6 +34,21 @@ function getReviewDelayDays(societyId) {
   return REVIEW_DELAY_DAYS[societyId] ?? 5;
 }
 
+let initialized = false;
+
+// schedule.js 가 dispatch 한 'paper:review_due' 를 받아 실제 심사를 마무리한다.
+// initSocietyPublications 와 동일한 idempotent 패턴 — HMR / 재import / 테스트
+// 환경에서 모듈이 다시 평가돼도 핸들러가 중복 등록되지 않는다.
+export function initPaperSystem() {
+  if (initialized) return;
+  initialized = true;
+
+  onBus('paper:review_due', (event) => {
+    const paperId = event?.payload?.paperId;
+    if (paperId) runDuePaperReview(paperId);
+  });
+}
+
 function getCurrentDayIndex() {
   const week = gameState.progression.currentWeek || 1;
   const day = gameState.progression.currentDay || 1;
@@ -168,14 +183,6 @@ export function runDuePaperReview(paperId) {
   saveGame();
   return review;
 }
-
-// 모듈 로드 시 단 한 번 등록되는 리스너. consumeTime/advanceDay가 큐 이벤트를
-// dispatch하면 schedule.js가 emit('paper:review_due', event) 호출하므로
-// payload.paperId 로 실제 심사를 진행한다.
-onBus('paper:review_due', (event) => {
-  const paperId = event?.payload?.paperId;
-  if (paperId) runDuePaperReview(paperId);
-});
 
 /**
  * 학회별 심사. 점수(score)와 결과(accepted/disputed/rejected)를 함께 반환한다.
