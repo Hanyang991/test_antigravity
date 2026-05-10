@@ -1,8 +1,8 @@
 /**
- * PR-A: 학회 탭 골격 회귀 테스트.
+ * PR-A: 학회지 NPC 논문을 학계(journal) 씬으로 이동 — 회귀 테스트.
  *
  * main 에서 실행하면 (1)/(2)/(3) 에서 FAIL — publications 가 paper-panel 에 그려지고
- * society-panel/society-badge 가 존재하지 않는다.
+ * scene-journal 에 학회지 섹션이 없다.
  * PR-A 이후 실행하면 모두 PASS.
  *
  * 실행:
@@ -78,41 +78,42 @@ function check(label, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${label}${detail ? ` — ${detail}` : ''}`);
 }
 
-// (1) society-panel 가 DOM 에 존재해야 한다.
-const societyPanel = window.document.getElementById('society-panel');
-check('(1) #society-panel exists', !!societyPanel);
+// (1) scene-journal 안 학회지 컨테이너 (#scene-journal-society-list) 가 존재해야 한다.
+const societyList = window.document.getElementById('scene-journal-society-list');
+check('(1) #scene-journal-society-list exists in journal scene', !!societyList);
 
-// (2) society-badge 가 활성 publication 수를 표시해야 한다.
-const societyBadge = window.document.getElementById('society-badge');
-const badgeText = societyBadge ? societyBadge.textContent.trim() : '';
+// (2) scene-btn[data-scene=journal] 의 #scene-journal-badge 가 활성 publication 수를 표시해야 한다.
+const journalBadge = window.document.getElementById('scene-journal-badge');
+const badgeText = journalBadge ? journalBadge.textContent.trim() : '';
 check(
-  '(2) #society-badge shows active publication count',
-  societyBadge && Number(badgeText) === active.length,
+  '(2) #scene-journal-badge shows active publication count',
+  journalBadge && Number(badgeText) === active.length,
   `expected ${active.length}, got "${badgeText}"`,
 );
 
-// (3) 학회 탭 클릭 → society-panel display === 'block'.
-const societyTabBtn = window.document.querySelector('.archive-tab[data-tab="society"]');
-if (!societyTabBtn) {
-  check('(3) clicking 학회 tab activates society-panel', false, 'tab button not found');
+// (3) 학계 씬 활성화 (scene-btn 클릭) → society-list 가 publication 으로 채워진다.
+const journalBtn = window.document.querySelector('.scene-btn[data-scene="journal"]');
+if (!journalBtn) {
+  check('(3) journal scene-btn activates society list', false, 'scene button not found');
 } else {
-  societyTabBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  journalBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  const cardsAfterClick = societyList ? societyList.querySelectorAll('.publication-card').length : 0;
   check(
-    '(3) clicking 학회 tab activates society-panel',
-    societyPanel && societyPanel.style.display === 'block',
-    `display="${societyPanel?.style.display}"`,
+    '(3) journal scene-btn click renders society list',
+    cardsAfterClick === active.length,
+    `expected ${active.length}, got ${cardsAfterClick}`,
   );
 }
 
-// (4) 학회 탭 안에 publication-card 들이 그려져 있어야 한다.
-const cardsInSociety = societyPanel ? societyPanel.querySelectorAll('.publication-card').length : 0;
+// (4) 활성 publication 모두가 society-list 안에서 학회별로 렌더링된다.
+const cardsInSocietyList = societyList ? societyList.querySelectorAll('.publication-card').length : 0;
 check(
-  '(4) society-panel renders publication-card list',
-  cardsInSociety === active.length,
-  `expected ${active.length}, got ${cardsInSociety}`,
+  '(4) #scene-journal-society-list renders all active publication-cards',
+  cardsInSocietyList === active.length,
+  `expected ${active.length}, got ${cardsInSocietyList}`,
 );
 
-// (5) 논문 탭 안에는 publication-card 가 없어야 한다.
+// (5) 논문 탭 안에는 publication-card 가 없어야 한다 (분리 핵심 검증).
 const paperPanel = window.document.getElementById('paper-panel');
 const paperTabBtn = window.document.querySelector('.archive-tab[data-tab="paper"]');
 if (paperTabBtn) paperTabBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
@@ -123,9 +124,18 @@ check(
   `got ${cardsInPaper} publication-cards in paper-panel`,
 );
 
-// (6) 학회별 accordion: 활성 publication 이 있는 학회는 자동으로 펼쳐져 있다.
-if (societyTabBtn) societyTabBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-const sections = societyPanel ? societyPanel.querySelectorAll('.society-section') : [];
+// (6) archive-panel 에 society 탭이 없다 (이전 골격 잔재 제거 검증).
+const oldSocietyTab = window.document.querySelector('.archive-tab[data-tab="society"]');
+const oldSocietyPanel = window.document.getElementById('society-panel');
+check(
+  '(6) old archive-tab/society-panel removed from archive-panel',
+  !oldSocietyTab && !oldSocietyPanel,
+  `tab=${!!oldSocietyTab}, panel=${!!oldSocietyPanel}`,
+);
+
+// (7) 학회별 accordion: 활성 publication 이 있는 학회는 자동으로 펼쳐져 있다.
+if (journalBtn) journalBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+const sections = societyList ? societyList.querySelectorAll('.society-section') : [];
 let openAreActive = true;
 let openCount = 0;
 for (const s of sections) {
@@ -138,7 +148,7 @@ for (const s of sections) {
   }
 }
 check(
-  '(6) society-section auto-expands societies with active publications',
+  '(7) society-section auto-expands societies with active publications',
   sections.length > 0 && openAreActive && openCount > 0,
   `${sections.length} sections, ${openCount} open, openAreActive=${openAreActive}`,
 );

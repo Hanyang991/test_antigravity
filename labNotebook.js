@@ -211,14 +211,6 @@ function createNotebookTab() {
       margin-left: 4px;
       display: none;
     ">0</span></button>
-    <button class="archive-tab" data-tab="society">학회 <span id="society-badge" style="
-      background: rgba(120, 180, 230, 0.8);
-      border-radius: 8px;
-      padding: 1px 6px;
-      font-size: 0.65rem;
-      margin-left: 4px;
-      display: none;
-    ">0</span></button>
     <button class="archive-tab" data-tab="expedition">탐사</button>
   `;
 
@@ -275,18 +267,6 @@ function createNotebookTab() {
   `;
   content.appendChild(paperPanel);
 
-  const societyPanel = document.createElement('div');
-  societyPanel.id = 'society-panel';
-  societyPanel.style.cssText = 'display: none;';
-  societyPanel.innerHTML = `
-    <div id="society-list" style="
-      max-height: 320px;
-      overflow-y: auto;
-      padding-right: 4px;
-    "></div>
-  `;
-  content.appendChild(societyPanel);
-
   const expeditionPanel = document.createElement('div');
   expeditionPanel.id = 'expedition-panel';
   expeditionPanel.style.cssText = 'display: none;';
@@ -313,7 +293,7 @@ function createNotebookTab() {
     const archiveContent = content.querySelector('.lore-text')?.parentElement;
     if (tab === 'archive') {
       for (const child of content.children) {
-        if (['notebook-panel', 'paper-panel', 'society-panel', 'expedition-panel', 'dictionary-panel'].includes(child.id)) child.style.display = 'none';
+        if (['notebook-panel', 'paper-panel', 'expedition-panel', 'dictionary-panel'].includes(child.id)) child.style.display = 'none';
         else child.style.display = '';
       }
     } else {
@@ -322,7 +302,6 @@ function createNotebookTab() {
       }
       if (tab === 'notebook') refreshNotebookList();
       else if (tab === 'paper') refreshPaperList();
-      else if (tab === 'society') refreshSocietyList();
       else if (tab === 'expedition') refreshExpeditionList();
       else if (tab === 'dictionary') refreshDictionaryList();
     }
@@ -529,10 +508,10 @@ function refreshPaperList() {
   });
 }
 
-// PR-A (학회 탭): 학회별 accordion. 각 섹션 = 학회 헤더 + (접고 펴침 가능한) NPC 논문 카드 리스트.
+// PR-A (학계 씬 학회지 섹션): 학회별 accordion. 각 섹션 = 학회 헤더 + (접고 펴침 가능한) NPC 논문 카드 리스트.
 // 활성 publication 이 있는 학회는 자동으로 펼쳐진 상태, 나머지는 접힌 상태로 렌더한다.
 function refreshSocietyList() {
-  const list = document.getElementById('society-list');
+  const list = document.getElementById('scene-journal-society-list');
   if (!list) return;
 
   const societies = getSocieties();
@@ -1242,7 +1221,7 @@ function createResourceHUD() {
       <button class="scene-btn active" type="button" data-scene="lab">🜂 연구실</button>
       <button class="scene-btn" type="button" data-scene="expedition">🧭 답사</button>
       <button class="scene-btn" type="button" data-scene="inbox">📬 메일<span class="scene-btn-badge" id="scene-inbox-badge" hidden>0</span></button>
-      <button class="scene-btn" type="button" data-scene="journal">📰 학계</button>
+      <button class="scene-btn" type="button" data-scene="journal">📰 학계<span class="scene-btn-badge" id="scene-journal-badge" hidden>0</span></button>
       <button class="scene-btn" type="button" data-scene="settings">⚙ 환경설정</button>
     </nav>
     <span class="hud-divider" aria-hidden="true"></span>
@@ -1401,7 +1380,14 @@ function setupScenes() {
         <h1>학계 저널</h1>
         <p>다른 학파·연구실이 발표한 논문을 열람합니다. 정설과 충돌하는 관측이 있다면 도전 논문 작성을 검토하세요.</p>
       </header>
-      <div class="journal-grid" id="journal-grid"></div>
+      <section class="journal-section">
+        <h2 class="journal-section-title">정설 논문</h2>
+        <div class="journal-grid" id="journal-grid"></div>
+      </section>
+      <section class="journal-section">
+        <h2 class="journal-section-title">학회지 — NPC 논문</h2>
+        <div id="scene-journal-society-list" class="journal-society-list"></div>
+      </section>
     </div>
   `;
   document.body.appendChild(journalScene);
@@ -1436,7 +1422,10 @@ function setActiveScene(name) {
 
   if (name === 'expedition') refreshExpeditionList();
   if (name === 'inbox') refreshInbox();
-  if (name === 'journal') refreshJournal();
+  if (name === 'journal') {
+    refreshJournal();
+    refreshSocietyList();
+  }
   if (name === 'settings') refreshSettings();
 }
 
@@ -1798,16 +1787,17 @@ function updatePaperBadge() {
   }
 }
 
-// PR-A: 학회 탭 배지 — 아직 반박되지 않은 활성 NPC 논문 수.
+// PR-A: 학계(journal) 씬 배지 — 아직 반박되지 않은 활성 NPC 논문 수.
 function updateSocietyBadge() {
-  const badge = document.getElementById('society-badge');
+  const badge = document.getElementById('scene-journal-badge');
   if (!badge) return;
   const count = getActivePublications().length;
   badge.textContent = count;
-  badge.style.display = count > 0 ? 'inline' : 'none';
+  if (count > 0) badge.removeAttribute('hidden');
+  else badge.setAttribute('hidden', '');
 
-  const panel = document.getElementById('society-panel');
-  if (panel && panel.style.display !== 'none') {
+  // 학계 씬이 활성화되어 있으면 즉시 반영.
+  if (document.body.dataset.scene === 'journal') {
     refreshSocietyList();
   }
 }

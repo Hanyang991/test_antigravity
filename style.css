@@ -610,6 +610,71 @@ body {
   cursor: default;
 }
 
+.journal-section {
+  margin-top: 1.5rem;
+}
+
+.journal-section + .journal-section {
+  margin-top: 2rem;
+}
+
+.journal-section-title {
+  margin: 0 0 0.75rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #4a3a25;
+  border-bottom: 1px dashed rgba(58, 44, 26, 0.25);
+  padding-bottom: 0.35rem;
+}
+
+.journal-society-list .society-section {
+  background: rgba(255, 247, 230, 0.85) !important;
+  border: 1px solid rgba(58, 44, 26, 0.22) !important;
+  border-radius: 3px !important;
+  margin-bottom: 0.6rem !important;
+}
+
+.journal-society-list .society-section-header {
+  color: #3a2c1a !important;
+  font-family: inherit !important;
+}
+
+.journal-society-list .society-section-header span:last-child {
+  color: #6b5e4a !important;
+}
+
+.journal-society-list .publication-card {
+  background: rgba(255, 252, 244, 0.92) !important;
+  border: 1px solid rgba(58, 44, 26, 0.18) !important;
+  border-radius: 3px !important;
+  color: #3a2c1a !important;
+}
+
+.journal-society-list .publication-card > div > span:first-child {
+  color: #2a1f12 !important;
+}
+
+.journal-society-list .publication-card > div:nth-child(2) {
+  color: #5a4a36 !important;
+  font-style: italic;
+}
+
+.journal-society-list .publication-card > div:nth-child(3) {
+  color: #3a2c1a !important;
+}
+
+.journal-society-list .publication-rebut {
+  background: rgba(139, 0, 0, 0.78) !important;
+  color: #fff8ec !important;
+  border-color: rgba(139, 0, 0, 0.95) !important;
+  font-family: inherit !important;
+}
+
+.journal-society-list .publication-rebut:hover {
+  background: rgba(170, 30, 30, 0.92) !important;
+}
+
 @media (max-width: 720px) {
   .inbox-layout {
     grid-template-columns: 1fr;
