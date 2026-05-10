@@ -1588,6 +1588,78 @@ const tests = [
     assert.equal(result.review.accepted, false);
   }],
 
+  ['publications: rebuttal review uses dedicated rebuttal_accepted / rebuttal_wrongful voice keys', async () => {
+    resetAll();
+    gameState.publications = { entries: {} };
+    gameState.academic.failedRebuttals = 0;
+    gameState.academic.successfulRebuttals = 0;
+    gameState.resources.reputation = 200;
+    gameState.resources.degreeScore = 200;
+
+    const { tickPublicationsForWeek, submitRebuttal } = await import('../societyPublications.js');
+    const { PAPER_SOCIETIES } = await import('../data/paperReviewData.js');
+    tickPublicationsForWeek(16);
+
+    // truthful=false → rebuttal_accepted voice
+    const exposed = submitRebuttal('pub_basic_002');
+    assert.equal(exposed.outcome, 'exposed');
+    const expectedAcceptedVoice = PAPER_SOCIETIES.basic_magic_society.reviewerVoice.rebuttal_accepted;
+    assert.ok(expectedAcceptedVoice && expectedAcceptedVoice.length > 0,
+      'fixture sanity: rebuttal_accepted key must exist on basic_magic_society');
+    assert.equal(exposed.review.reviewerVoice, expectedAcceptedVoice,
+      `expected rebuttal_accepted voice, got: '${exposed.review.reviewerVoice}'`);
+    // generic 'accepted' voice 가 흘러나오는 회귀를 명시적으로 차단
+    const genericAccepted = PAPER_SOCIETIES.basic_magic_society.reviewerVoice.accepted;
+    assert.notEqual(exposed.review.reviewerVoice, genericAccepted,
+      'rebuttal voice must NOT fall back to generic accepted voice');
+
+    // truthful=true → rebuttal_wrongful voice
+    const wrongful = submitRebuttal('pub_basic_001');
+    assert.equal(wrongful.outcome, 'wrongful');
+    const expectedWrongfulVoice = PAPER_SOCIETIES.basic_magic_society.reviewerVoice.rebuttal_wrongful;
+    assert.ok(expectedWrongfulVoice && expectedWrongfulVoice.length > 0,
+      'fixture sanity: rebuttal_wrongful key must exist on basic_magic_society');
+    assert.equal(wrongful.review.reviewerVoice, expectedWrongfulVoice,
+      `expected rebuttal_wrongful voice, got: '${wrongful.review.reviewerVoice}'`);
+    const genericRejected = PAPER_SOCIETIES.basic_magic_society.reviewerVoice.rejected;
+    assert.notEqual(wrongful.review.reviewerVoice, genericRejected,
+      'rebuttal voice must NOT fall back to generic rejected voice');
+  }],
+
+  ['publications: rebuttal voice falls back to generic when rebuttal_* keys are missing', async () => {
+    resetAll();
+    gameState.publications = { entries: {} };
+    gameState.academic.failedRebuttals = 0;
+    gameState.academic.successfulRebuttals = 0;
+    gameState.resources.reputation = 200;
+    gameState.resources.degreeScore = 200;
+
+    const { tickPublicationsForWeek, submitRebuttal } = await import('../societyPublications.js');
+    const { PAPER_SOCIETIES } = await import('../data/paperReviewData.js');
+    tickPublicationsForWeek(16);
+
+    // 학회의 rebuttal_* 키를 일시적으로 제거 → fallback 경로 검증.
+    const society = PAPER_SOCIETIES.basic_magic_society;
+    const stash = {
+      rebuttal_accepted: society.reviewerVoice.rebuttal_accepted,
+      rebuttal_wrongful: society.reviewerVoice.rebuttal_wrongful,
+    };
+    delete society.reviewerVoice.rebuttal_accepted;
+    delete society.reviewerVoice.rebuttal_wrongful;
+
+    try {
+      const exposed = submitRebuttal('pub_basic_002');
+      assert.equal(exposed.outcome, 'exposed');
+      assert.equal(exposed.review.reviewerVoice, society.reviewerVoice.accepted,
+        'fallback: rebuttal_accepted absent → use generic accepted voice');
+      assert.ok(exposed.review.reviewerVoice.length > 0, 'fallback voice must be non-empty');
+    } finally {
+      // 원본 데이터 복원 — 이후 테스트에 영향 없도록.
+      society.reviewerVoice.rebuttal_accepted = stash.rebuttal_accepted;
+      society.reviewerVoice.rebuttal_wrongful = stash.rebuttal_wrongful;
+    }
+  }],
+
   ['publications: failedRebuttals counter accumulates across multiple wrongful rebuttals (M9 PR-J)', async () => {
     resetAll();
     gameState.publications = { entries: {} };
