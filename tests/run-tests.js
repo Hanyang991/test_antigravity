@@ -1283,6 +1283,50 @@ const tests = [
     assert.equal(plan.classification.classification, 'known_disputed');
   }],
 
+  ['getEligiblePaperPlans gates refinement on repro >= 3 (balance)', () => {
+    resetAll();
+    const sig = 'sig_refinement_repro_gate';
+    // 단 1회 관측만 한 시그니처. mismatch 가 있어도 표본이 부족하므로 refinement
+    // 옵션이 노출되어선 안 된다 (단발 관측으로 basic 학회 통과를 막기 위한 floor).
+    // grade='sentence' 로 두면 sentence_formula 가 fallback type 으로 살아있어서
+    // plan 자체는 surface 되고, refinement 만 정확히 빠져 있는지 검증할 수 있다.
+    const analysis = makeAnalysis({ signature: sig, instability: 30, grade: 'sentence', rawSentenceGrade: '문장' });
+    recordDiscovery(analysis);
+    assert.equal(getDiscovery(sig).reproducibility.count, 1);
+
+    gameState.academic.canonMismatches.push({
+      id: `mismatch_canon_004_${sig}`,
+      canonId: 'canon_004',
+      canonTitle: '서리 결정 정설',
+      canonOfficialName: '서리 결정',
+      signature: sig,
+      discoverySignature: sig,
+      reasons: ['dynamics mismatch'],
+      actualObservables: { dynamics: '냉각', instabilityBand: 30 },
+      message: 'test mismatch',
+      createdAt: Date.now(),
+    });
+
+    let plans = getEligiblePaperPlans();
+    let plan = plans.find((p) => p.signature === sig);
+    assert.ok(plan, 'plan must surface (sentence_formula keeps it alive)');
+    assert.ok(!plan.types.includes('refinement'),
+      `refinement must be gated until repro >= 3, got types=${JSON.stringify(plan.types)}`);
+    assert.ok(!plan.types.includes('new_discovery'),
+      `new_discovery must also be gated at repro=1, got types=${JSON.stringify(plan.types)}`);
+
+    // 재현 2회 더 누적 → repro=3 → refinement 가 풀린다.
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    assert.equal(getDiscovery(sig).reproducibility.count, 3);
+
+    plans = getEligiblePaperPlans();
+    plan = plans.find((p) => p.signature === sig);
+    assert.ok(plan, 'plan must still surface at repro=3');
+    assert.ok(plan.types.includes('refinement'),
+      `refinement must unlock at repro=3, got types=${JSON.stringify(plan.types)}`);
+  }],
+
   ['inspectCanonMismatch records canonMatches entry on hint match (M7 PR-F)', () => {
     resetAll();
     // canon_001 legacyHint = { mainRune: '원(○)', radical: '이사(|)', position: 'middle' }

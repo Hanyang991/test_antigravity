@@ -485,7 +485,12 @@ function getEligiblePaperTypes(discovery) {
   // known_correct (mismatch 없음) 에서는 자연히 비활성화된다.
   const isKnownCorrect = classification.classification === 'known_correct';
   if (repro >= 3 && !hasAcceptedNew && !isKnownCorrect) types.push('new_discovery');
-  if (mismatch) types.push('refinement');
+  // refinement 도 new_discovery 와 동일하게 재현 3회 이상을 요구한다. mismatch 가
+  // 잡혔다는 사실 하나로 곧장 refinement 를 노출하면, 단 1회 관측 표본으로
+  // basic 학회 (acceptThreshold 60) 를 통과할 수 있는 경로가 생긴다 — 등급=phrase
+  // (25) + 안정성≤50 (25) + type bonus (15) = 65. 정설 보완 논문을 단발 관측으로
+  // 받아주면 게임 의도(재현→문법→논문) 가 무너지므로 동일한 floor 를 둔다.
+  if (mismatch && repro >= 3) types.push('refinement');
   if (mismatch && repro >= 10) types.push('challenge');
   if (grade === 'sentence' || grade === 'incantation') types.push('sentence_formula');
   if (gameState.progression.currentPhase >= 3 && grade === 'incantation') types.push('forbidden');
