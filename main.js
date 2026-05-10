@@ -10,6 +10,7 @@ import { initLabNotebook, showToast } from './labNotebook.js'
 import { initAcademicCanon } from './academicCanon.js'
 import { renderAcademicUI } from './academicUI.js'
 import { initInbox } from './inboxSystem.js'
+import { initSocietyPublications } from './societyPublications.js'
 import { playCast, playDrawStart, playRiftControl, playStrokeCommit, primeAudio } from './sound.js'
 import { formatCanvasStatus, formatCastInjection } from './magicStatusUi.js'
 
@@ -397,6 +398,7 @@ function init() {
   loadGame();
   initAcademicCanon();
   initInbox();
+  initSocietyPublications();
   initLabNotebook();
   renderAcademicUI(gameState, lastAnalysis);
   startAutosave();

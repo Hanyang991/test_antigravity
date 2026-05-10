@@ -1425,6 +1425,217 @@ const tests = [
     assert.equal(second.ok, false);
     assert.match(second.reason, /이미 등재/);
   }],
+
+  // ── PR-J: NPC 학회지 논문 + 반박 ──────────────────────────────
+  ['publications: tickPublicationsForWeek releases papers up to current week (idempotent) (M9 PR-J)', async () => {
+    resetAll();
+    gameState.publications = { entries: {} };
+    gameState.academic.failedRebuttals = 0;
+    gameState.academic.successfulRebuttals = 0;
+
+    const { tickPublicationsForWeek, getActivePublications, getPublicationTemplates } = await import('../societyPublications.js');
+
+    // Week 1 → only week-1 publications (none in pool — earliest is week 2)
+    tickPublicationsForWeek(1);
+    let active = getActivePublications();
+    assert.equal(active.length, 0, 'no publications scheduled for week 1');
+
+    // Week 5 → everything with releaseWeek <= 5 should be released
+    tickPublicationsForWeek(5);
+    active = getActivePublications();
+    const expectedCount = getPublicationTemplates().filter((p) => p.releaseWeek <= 5).length;
+    assert.equal(active.length, expectedCount, `expected ${expectedCount} active by week 5, got ${active.length}`);
+    assert.ok(expectedCount >= 3, 'at least 3 publications by week 5');
+
+    // Idempotent: re-ticking same week doesn't double-release
+    const before = active.length;
+    tickPublicationsForWeek(5);
+    assert.equal(getActivePublications().length, before, 'idempotent re-tick must not duplicate');
+
+    // Tick to week 16 → all publications released
+    tickPublicationsForWeek(16);
+    const allCount = getPublicationTemplates().length;
+    assert.equal(getActivePublications().length, allCount, `all ${allCount} publications must be active by week 16`);
+  }],
+
+  ['publications: rebutting a truthful=false NPC paper grants exposed reward (M9 PR-J)', async () => {
+    resetAll();
+    gameState.publications = { entries: {} };
+    gameState.academic.failedRebuttals = 0;
+    gameState.academic.successfulRebuttals = 0;
+
+    const { tickPublicationsForWeek, submitRebuttal, getPublicationTemplate } = await import('../societyPublications.js');
+    const { REBUTTAL_OUTCOMES } = await import('../data/societyPublicationsData.js');
+
+    // pub_basic_002 defends canon_001 (canon.isCorrect=false), so truthful=false → exposed reward
+    tickPublicationsForWeek(16);
+    const tpl = getPublicationTemplate('pub_basic_002');
+    assert.equal(tpl.truthful, false, 'fixture sanity: pub_basic_002 should be truthful=false');
+
+    const baselineDegree = gameState.resources.degreeScore;
+    const baselineRep = gameState.resources.reputation;
+    const baselineFunds = gameState.resources.researchFunds;
+
+    let firedRebuttalEvent = null;
+    const handler = (e) => { firedRebuttalEvent = e; };
+    onBus('publication:rebutted', handler);
+
+    const result = submitRebuttal('pub_basic_002');
+    assert.equal(result.ok, true);
+    assert.equal(result.outcome, 'exposed');
+    assert.deepEqual(result.deltas, REBUTTAL_OUTCOMES.exposed);
+    assert.equal(result.timeConsumed, ACTION_COSTS.submitRebuttal);
+
+    // resources increased
+    assert.equal(gameState.resources.degreeScore, baselineDegree + REBUTTAL_OUTCOMES.exposed.degreeScore);
+    assert.equal(gameState.resources.reputation, baselineRep + REBUTTAL_OUTCOMES.exposed.reputation);
+    assert.equal(gameState.resources.researchFunds, baselineFunds + REBUTTAL_OUTCOMES.exposed.researchFunds);
+
+    // counters
+    assert.equal(gameState.academic.successfulRebuttals, 1);
+    assert.equal(gameState.academic.failedRebuttals, 0);
+
+    // paper goes to accepted bucket
+    assert.ok(gameState.papers.accepted.find((p) => p.id === result.paper.id));
+
+    // event fired
+    assert.ok(firedRebuttalEvent, 'publication:rebutted event must fire');
+    assert.equal(firedRebuttalEvent.outcome, 'exposed');
+
+    offBus('publication:rebutted', handler);
+  }],
+
+  ['publications: rebutting a truthful=true NPC paper applies wrongful penalty (M9 PR-J)', async () => {
+    resetAll();
+    gameState.publications = { entries: {} };
+    gameState.academic.failedRebuttals = 0;
+    gameState.academic.successfulRebuttals = 0;
+    // pad reputation so penalty is visible (not clamped at 0)
+    gameState.resources.reputation = 50;
+    gameState.resources.degreeScore = 50;
+
+    const { tickPublicationsForWeek, submitRebuttal, getPublicationTemplate } = await import('../societyPublications.js');
+    const { REBUTTAL_OUTCOMES } = await import('../data/societyPublicationsData.js');
+
+    // pub_basic_001 defends canon_002 (canon.isCorrect=true), so truthful=true → wrongful penalty
+    tickPublicationsForWeek(16);
+    const tpl = getPublicationTemplate('pub_basic_001');
+    assert.equal(tpl.truthful, true, 'fixture sanity: pub_basic_001 should be truthful=true');
+
+    const baselineDegree = gameState.resources.degreeScore;
+    const baselineRep = gameState.resources.reputation;
+
+    const result = submitRebuttal('pub_basic_001');
+    assert.equal(result.ok, true);
+    assert.equal(result.outcome, 'wrongful');
+    assert.deepEqual(result.deltas, REBUTTAL_OUTCOMES.wrongful);
+
+    // resources decreased
+    assert.equal(gameState.resources.degreeScore, baselineDegree + REBUTTAL_OUTCOMES.wrongful.degreeScore);
+    assert.equal(gameState.resources.reputation, baselineRep + REBUTTAL_OUTCOMES.wrongful.reputation);
+
+    // counters
+    assert.equal(gameState.academic.failedRebuttals, 1);
+    assert.equal(gameState.academic.successfulRebuttals, 0);
+
+    // paper goes to rejected bucket
+    assert.ok(gameState.papers.rejected.find((p) => p.id === result.paper.id));
+    assert.equal(result.paper.status, 'rejected');
+    assert.equal(result.review.accepted, false);
+  }],
+
+  ['publications: failedRebuttals counter accumulates across multiple wrongful rebuttals (M9 PR-J)', async () => {
+    resetAll();
+    gameState.publications = { entries: {} };
+    gameState.academic.failedRebuttals = 0;
+    gameState.academic.successfulRebuttals = 0;
+    gameState.resources.reputation = 200;
+    gameState.resources.degreeScore = 200;
+
+    const { tickPublicationsForWeek, submitRebuttal, getPublicationTemplates } = await import('../societyPublications.js');
+    tickPublicationsForWeek(16);
+
+    const truthfulIds = getPublicationTemplates().filter((p) => p.truthful).map((p) => p.id);
+    assert.ok(truthfulIds.length >= 2, 'need at least 2 truthful publications for accumulation test');
+
+    const r1 = submitRebuttal(truthfulIds[0]);
+    assert.equal(r1.outcome, 'wrongful');
+    assert.equal(gameState.academic.failedRebuttals, 1);
+
+    const r2 = submitRebuttal(truthfulIds[1]);
+    assert.equal(r2.outcome, 'wrongful');
+    assert.equal(gameState.academic.failedRebuttals, 2);
+  }],
+
+  ['publications: cannot rebut same publication twice (idempotent guard) (M9 PR-J)', async () => {
+    resetAll();
+    gameState.publications = { entries: {} };
+    gameState.academic.failedRebuttals = 0;
+    gameState.academic.successfulRebuttals = 0;
+
+    const { tickPublicationsForWeek, submitRebuttal, getActivePublications } = await import('../societyPublications.js');
+    tickPublicationsForWeek(16);
+    const activeBefore = getActivePublications().length;
+
+    const first = submitRebuttal('pub_basic_002');
+    assert.equal(first.ok, true);
+
+    // Active list shrinks by 1 (the rebutted one disappears)
+    assert.equal(getActivePublications().length, activeBefore - 1);
+
+    const second = submitRebuttal('pub_basic_002');
+    assert.equal(second.ok, false);
+    assert.match(second.reason, /이미 반박/);
+  }],
+
+  ['publications: cannot rebut a publication that has not been released (M9 PR-J)', async () => {
+    resetAll();
+    gameState.publications = { entries: {} };
+
+    const { tickPublicationsForWeek, submitRebuttal, getPublicationTemplates } = await import('../societyPublications.js');
+    // Tick only to week 1 — most publications still pending
+    tickPublicationsForWeek(1);
+
+    const lateTpl = getPublicationTemplates().find((p) => p.releaseWeek > 10);
+    assert.ok(lateTpl, 'fixture must contain at least one late-release publication');
+
+    const result = submitRebuttal(lateTpl.id);
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /출간되지 않은/);
+  }],
+
+  ['publications: unknown publication id returns ok=false (M9 PR-J)', async () => {
+    resetAll();
+    gameState.publications = { entries: {} };
+    const { submitRebuttal } = await import('../societyPublications.js');
+    const result = submitRebuttal('pub_does_not_exist');
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /찾을 수 없습니다/);
+  }],
+
+  ['publications: ACTION_COSTS.submitRebuttal is exposed and positive (M9 PR-J)', () => {
+    assert.equal(typeof ACTION_COSTS.submitRebuttal, 'number');
+    assert.ok(ACTION_COSTS.submitRebuttal > 0, 'submitRebuttal cost must be positive');
+  }],
+
+  ['publications: rebuttal advances schedule by ACTION_COSTS.submitRebuttal days (M9 PR-J)', async () => {
+    resetAll();
+    gameState.publications = { entries: {} };
+    gameState.resources.reputation = 100;
+    gameState.resources.degreeScore = 100;
+
+    const { tickPublicationsForWeek, submitRebuttal } = await import('../societyPublications.js');
+    tickPublicationsForWeek(16);
+
+    const baselineWeek = gameState.progression.currentWeek;
+    const baselineDay = gameState.progression.currentDay;
+
+    const result = submitRebuttal('pub_basic_002');
+    assert.equal(result.ok, true);
+
+    const dayDelta = (gameState.progression.currentWeek - baselineWeek) * 7 + (gameState.progression.currentDay - baselineDay);
+    assert.equal(dayDelta, ACTION_COSTS.submitRebuttal, `expected ${ACTION_COSTS.submitRebuttal}d advance, got ${dayDelta}`);
+  }],
 ];
 
 let failed = 0;
