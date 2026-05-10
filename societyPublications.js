@@ -20,6 +20,7 @@ import { on, emit } from './eventBus.js';
 import { saveGame } from './saveLoad.js';
 import { consumeForAction } from './actionCosts.js';
 import { SOCIETY_PUBLICATIONS, REBUTTAL_OUTCOMES } from './data/societyPublicationsData.js';
+import { CANON_DATA } from './data/canonData.js';
 import { PAPER_SOCIETIES } from './data/paperReviewData.js';
 
 let initialized = false;
@@ -43,12 +44,77 @@ function ensureAcademicCounters() {
   }
 }
 
+/**
+ * publication 데이터의 truthful 플래그가 stance × canon.isCorrect 와
+ * 일관되는지 검사한다. 실제 게임 로직은 truthful 만 보므로
+ * 이 둘 이 맞지 않으면 반박 결과가 조용히 임의로 뒤집어진다 —
+ * 대신 이 검사자가 이름을 붙여 dev 환경에서만 경고한다.
+ *
+ * 규칙:
+ *   - canon 이 존재해야 검사 대상 (standalone 논문은 stance 무관하게 skip)
+ *   - stance === 'defends'    → truthful  ===  canon.isCorrect
+ *   - stance === 'challenges' → truthful  === !canon.isCorrect
+ *
+ * @param {object} [options]
+ * @param {ReadonlyArray} [options.publications=SOCIETY_PUBLICATIONS]
+ * @param {ReadonlyArray} [options.canons=CANON_DATA]
+ * @returns {{ ok: boolean, errors: Array<{ publicationId, reason, expectedTruthful, actualTruthful }> }}
+ */
+export function validatePublicationConsistency({
+  publications = SOCIETY_PUBLICATIONS,
+  canons = CANON_DATA,
+} = {}) {
+  const canonById = new Map(canons.map((c) => [c.id, c]));
+  const errors = [];
+  for (const pub of publications) {
+    if (!pub.targetCanonId) continue;
+    if (pub.stance !== 'defends' && pub.stance !== 'challenges') continue;
+
+    const canon = canonById.get(pub.targetCanonId);
+    if (!canon) {
+      errors.push({
+        publicationId: pub.id,
+        reason: `targetCanonId='${pub.targetCanonId}' 을 canon 레지스트리에서 찾을 수 없음`,
+        expectedTruthful: null,
+        actualTruthful: pub.truthful,
+      });
+      continue;
+    }
+
+    const expected = pub.stance === 'defends' ? !!canon.isCorrect : !canon.isCorrect;
+    if (expected !== !!pub.truthful) {
+      errors.push({
+        publicationId: pub.id,
+        reason: `stance='${pub.stance}' + canon.isCorrect=${canon.isCorrect}\u2192 truthful=${expected} 이어야 함`,
+        expectedTruthful: expected,
+        actualTruthful: !!pub.truthful,
+      });
+    }
+  }
+  return { ok: errors.length === 0, errors };
+}
+
 export function initSocietyPublications() {
   if (initialized) return;
   initialized = true;
 
   ensurePublicationsSlot();
   ensureAcademicCounters();
+
+  // dev assertion: 데이터 추가자가 stance/canon.isCorrect/truthful 매핑을
+  // 깨뜨리면 콘솔에 즉시 노출해 조용히 프로덕션에 들어가는 것을 막는다.
+  // throw 가 아닌 warn 으로 — 게임 동작은 건드리지 않고 신호만 올린다.
+  // 단위 테스트는 validatePublicationConsistency() 를 직접 써서 assert.
+  const validation = validatePublicationConsistency();
+  if (!validation.ok) {
+    for (const err of validation.errors) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[societyPublications] inconsistent publication '${err.publicationId}': ${err.reason}`
+        + ` (actual truthful=${err.actualTruthful}, expected=${err.expectedTruthful})`,
+      );
+    }
+  }
 
   // 게임이 처음 시작될 때(week=1) 와 매 주 진입 시 같이 처리.
   tickPublicationsForWeek(gameState.progression.currentWeek);

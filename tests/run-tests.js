@@ -1502,6 +1502,84 @@ const tests = [
     assert.equal(getActivePublications().length, allCount, `all ${allCount} publications must be active by week 16`);
   }],
 
+  ['publications: SOCIETY_PUBLICATIONS data is consistent (stance × canon.isCorrect ⇔ truthful)', async () => {
+    const { validatePublicationConsistency } = await import('../societyPublications.js');
+    const result = validatePublicationConsistency();
+    if (!result.ok) {
+      const detail = result.errors
+        .map((e) => `  - ${e.publicationId}: ${e.reason} (actual=${e.actualTruthful}, expected=${e.expectedTruthful})`)
+        .join('\n');
+      assert.fail(`publication 데이터에 일관성 위반이 ${result.errors.length} 건 있습니다:\n${detail}`);
+    }
+    assert.equal(result.errors.length, 0);
+  }],
+
+  ['validatePublicationConsistency catches a flipped truthful flag (regression sanity check)', async () => {
+    const { validatePublicationConsistency } = await import('../societyPublications.js');
+    const { CANON_DATA } = await import('../data/canonData.js');
+
+    // pub fixture: 'defends' + canon_002 (isCorrect=true) 면 truthful=true 가 정답.
+    // 일부러 truthful=false 로 뒤집어서 validator 가 잡는지 확인.
+    const broken = [{
+      id: 'pub_test_broken',
+      society: 'basic_magic_society',
+      title: '깨진 fixture',
+      author: 'test',
+      targetCanonId: 'canon_002', // isCorrect=true
+      stance: 'defends',
+      truthful: false, // ← stance × canon 이면 true 여야 하는데 false
+    }];
+
+    const broken1 = validatePublicationConsistency({ publications: broken, canons: CANON_DATA });
+    assert.equal(broken1.ok, false);
+    assert.equal(broken1.errors.length, 1);
+    assert.equal(broken1.errors[0].publicationId, 'pub_test_broken');
+    assert.equal(broken1.errors[0].expectedTruthful, true);
+    assert.equal(broken1.errors[0].actualTruthful, false);
+
+    // challenges + isCorrect=true → truthful=false 가 정답. true 로 뒤집으면 catch.
+    const broken2Pubs = [{
+      id: 'pub_test_challenges_broken',
+      society: 'basic_magic_society',
+      title: '깨진 fixture 2',
+      author: 'test',
+      targetCanonId: 'canon_002',
+      stance: 'challenges',
+      truthful: true, // ← false 여야 함
+    }];
+    const broken2 = validatePublicationConsistency({ publications: broken2Pubs, canons: CANON_DATA });
+    assert.equal(broken2.ok, false);
+    assert.equal(broken2.errors[0].expectedTruthful, false);
+    assert.equal(broken2.errors[0].actualTruthful, true);
+
+    // 알 수 없는 canon id → 별도 에러로 잡힘
+    const unknownCanonPubs = [{
+      id: 'pub_test_unknown_canon',
+      society: 'basic_magic_society',
+      title: '없는 canon 참조',
+      author: 'test',
+      targetCanonId: 'canon_does_not_exist',
+      stance: 'defends',
+      truthful: true,
+    }];
+    const unknown = validatePublicationConsistency({ publications: unknownCanonPubs, canons: CANON_DATA });
+    assert.equal(unknown.ok, false);
+    assert.match(unknown.errors[0].reason, /찾을 수 없음/);
+
+    // standalone / canon 없는 publication 은 skip — truthful 값 무관
+    const skipped = [{
+      id: 'pub_test_standalone',
+      society: 'basic_magic_society',
+      title: 'canon 없는 논문',
+      author: 'test',
+      targetCanonId: null,
+      stance: 'standalone',
+      truthful: true,
+    }];
+    const skippedResult = validatePublicationConsistency({ publications: skipped, canons: CANON_DATA });
+    assert.equal(skippedResult.ok, true);
+  }],
+
   ['publications: rebutting a truthful=false NPC paper grants exposed reward (M9 PR-J)', async () => {
     resetAll();
     gameState.publications = { entries: {} };
