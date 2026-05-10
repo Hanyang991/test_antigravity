@@ -18,7 +18,7 @@ globalThis.localStorage = {
 
 const { gameState, resetState } = await import('../gameState.js');
 const { recordDiscovery, getDiscovery } = await import('../discoverySystem.js');
-const { createPaperDraft, getPaperSuggestion, submitPaper, runDuePaperReview } = await import('../paperSystem.js');
+const { createPaperDraft, getPaperSuggestion, submitPaper, runDuePaperReview, initPaperSystem } = await import('../paperSystem.js');
 const { applyForGrant, signContract, sellScroll, tickEconomyWeek } = await import('../economy.js');
 const { startExpedition } = await import('../expedition.js');
 const { advanceDay, enqueueEvent, getPendingEvents, consumeTime } = await import('../schedule.js');
@@ -184,6 +184,11 @@ function makeTriangleBones(offsetX = 0, offsetY = 0) {
     makeLineStroke(85 + offsetX, 85 + offsetY, 50 + offsetX, 10 + offsetY, 'bone', 300),
   ];
 }
+
+// paperSystem.js no longer auto-registers its 'paper:review_due' listener at
+// module load — initPaperSystem() does. Call it once here so all schedule-driven
+// review tests work the same as before.
+initPaperSystem();
 
 const tests = [
   ['recordDiscovery stores and reproduces a phenomenon', () => {
@@ -416,6 +421,35 @@ const tests = [
       'time must have progressed');
 
     offBus('paper:review_due', handler);
+  }],
+
+  ['initPaperSystem is idempotent — review listener is registered exactly once', () => {
+    resetAll();
+    // 단위 테스트 진입 시점에 이미 한 번 호출된 상태. 다시 100번 호출해도
+    // 'paper:review_due' 핸들러가 중복 등록되지 않아야 한다.
+    for (let i = 0; i < 100; i++) initPaperSystem();
+
+    const analysis = makeAnalysis({ signature: 'sig_idempotent', instability: 18, grade: 'single_rune' });
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+    recordDiscovery(analysis);
+
+    const draft = createPaperDraft({
+      discoverySignature: 'sig_idempotent',
+      type: 'new_discovery',
+      targetSociety: 'basic_magic_society',
+    });
+    submitPaper(draft.id);
+
+    // submitPaper 가 정확히 1개의 review_due 이벤트를 enqueue 한다.
+    const before = gameState.papers.accepted.length;
+    advanceDay(3);
+    // 만약 listener 가 중복 등록됐다면 runDuePaperReview 가 N번 불려서 finalize
+    // 가 N번 일어나고 accepted 도 중복으로 push 되어 카운트가 2 이상이 된다.
+    assert.equal(gameState.papers.accepted.length - before, 1,
+      `expected exactly one accept after schedule fires (listener double-fire?), got delta=${gameState.papers.accepted.length - before}`);
+    assert.equal(gameState.papers.submitted.length, 0,
+      'submitted must be drained exactly once');
   }],
 
   ['consumeTime auto-progresses time and dispatches events between (M8)', () => {
