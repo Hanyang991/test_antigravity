@@ -15,7 +15,11 @@ import { consumeForAction } from './actionCosts.js';
 // disputed paper 가 basic 학회 acceptThreshold(60)를 통과하면서 high(70)
 // 에는 못 닿는 수준 — raw 95 → final 67. 0.4 시절에는 사실상 hard-reject
 // 였어서 manual 검증 후 완화함.
-const DISPUTED_CANON_PENALTY_MULTIPLIER = 0.7;
+//
+// UI(논문 카드 / 모달 경고)가 "NN% 차감" 문구를 동적으로 계산할 수 있도록
+// export 한다 — 하드코딩된 문자열이 이 상수 튜닝 시 조용히 어긋나지 않도록
+// 하는 장치.
+export const DISPUTED_CANON_PENALTY_MULTIPLIER = 0.7;
 
 // 학회별 심사 지연 일수 — submitPaper 시점에서 N일 뒤 'paper:review_due' 이벤트가
 // fire 되어야 reviewPaper가 호출된다 (M8: 시간 흐름 기반 심사).
@@ -244,10 +248,12 @@ export function reviewPaper(paper) {
   const finalReasons = [...scored.reasons];
   let penaltyApplied = false;
 
-  // PR-F: known_disputed + new_discovery → 점수/보상 큰 폭 차감 (옵션 B).
-  // 기존 정설을 검증하는 미세 기여로 취급. 임계값 판정은 차감된 점수 기준이지만,
-  // 페널티 곱이 0.4 이므로 상위 학회 임계값(60+)에는 거의 도달하지 못하고
-  // 낮은 임계값을 가진 학회에서도 marginal 한 통과만 허용된다.
+  // PR-F: known_disputed + new_discovery → 점수/보상 차감 (옵션 B).
+  // 기존 정설을 검증하는 미세 기여로 취급하며, 임계값 판정은 차감된 점수
+  // 기준이다. 현재 곱은 DISPUTED_CANON_PENALTY_MULTIPLIER(=0.7) — 잘 쓴
+  // disputed paper(raw 95) 가 basic 학회 acceptThreshold(60) 는 통과(최종 67)
+  // 하면서 high(70) 에는 닿지 않는 수준이다. 이전 0.4 시절에는 사실상 hard-reject
+  // 였어서 PR-F tune 커밋(8c3d314)에서 0.7 로 완화됨.
   if (
     classification.classification === 'known_disputed' &&
     paper.type === 'new_discovery' &&

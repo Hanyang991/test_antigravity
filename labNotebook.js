@@ -12,7 +12,14 @@ import { gameState } from './gameState.js';
 import { on } from './eventBus.js';
 import { getAllDiscoveries, nameDiscovery } from './discoverySystem.js';
 import { getCanonMismatches, classifyDiscoveryAgainstCanon, registerCanon } from './academicCanon.js';
-import { createPaperDraft, getEligiblePaperPlans, getPaperSuggestion, getSocieties, submitPaper } from './paperSystem.js';
+import {
+  createPaperDraft,
+  getEligiblePaperPlans,
+  getPaperSuggestion,
+  getSocieties,
+  submitPaper,
+  DISPUTED_CANON_PENALTY_MULTIPLIER,
+} from './paperSystem.js';
 import { getActivePublications, submitRebuttal } from './societyPublications.js';
 import { getExpeditionSites, startExpedition } from './expedition.js';
 import { applyForGrant, getGrantOffers, getContractOffers, sellScroll, signContract } from './economy.js';
@@ -23,6 +30,10 @@ import { getJournalPapers, getCanonForPaper } from './journalSystem.js';
 import { SENDER_ROLES } from './data/inboxSeed.js';
 import { resetState } from './gameState.js';
 import { clearSave, saveGame } from './saveLoad.js';
+
+// known_disputed 정설 위에 올라온 new_discovery 논문의 점수/보상 차감률(%).
+// paperSystem 의 DISPUTED_CANON_PENALTY_MULTIPLIER 가 튜닝되면 자동으로 따라간다.
+const DISPUTED_CANON_PENALTY_PERCENT = Math.round((1 - DISPUTED_CANON_PENALTY_MULTIPLIER) * 100);
 
 // ── 초기화 ────────────────────────────────────────────────────────
 let initialized = false;
@@ -47,6 +58,7 @@ export function initLabNotebook() {
   on('paper:submitted', handlePaperSubmitted);
   on('paper:accepted', handlePaperAccepted);
   on('paper:rejected', handlePaperRejected);
+  on('paper:disputed', handlePaperDisputed);
   on('canon:registered', handleCanonRegistered);
   on('expedition:started', handleExpeditionStarted);
   on('expedition:completed', handleExpeditionCompleted);
@@ -429,9 +441,10 @@ function refreshPaperList() {
 
   const accepted = gameState.papers.accepted;
   const rejected = gameState.papers.rejected;
+  const disputes = Array.isArray(gameState.papers.disputes) ? gameState.papers.disputes : [];
   const publications = getActivePublications();
 
-  if (eligible.length === 0 && accepted.length === 0 && rejected.length === 0 && publications.length === 0) {
+  if (eligible.length === 0 && accepted.length === 0 && rejected.length === 0 && disputes.length === 0 && publications.length === 0) {
     list.innerHTML = `
       <p style="color: #666; font-size: 0.8rem; text-align: center; padding: 20px 0;">
         아직 제출 가능한 논문이 없습니다.<br>현상을 3회 이상 재현해 보세요.
@@ -467,7 +480,7 @@ function refreshPaperList() {
     `;
   }).join('');
 
-  const resultHtml = renderPaperHistory(accepted, rejected, mismatches);
+  const resultHtml = renderPaperHistory(accepted, rejected, disputes, mismatches);
   const publicationsHtml = renderPublicationsSection(publications);
 
   list.innerHTML = `
@@ -834,15 +847,28 @@ function refreshExpeditionList() {
   }
 }
 
-function renderPaperHistory(accepted, rejected, mismatches) {
+function renderPaperHistory(accepted, rejected, disputes, mismatches) {
   const acceptedHtml = accepted.slice(0, 4).map((paper) => renderReviewedCard(paper, 'accepted')).join('');
   const rejectedHtml = rejected.slice(0, 4).map((paper) => renderReviewedCard(paper, 'rejected')).join('');
+  const disputesHtml = (disputes || []).slice(0, 4).map((paper) => renderReviewedCard(paper, 'disputed')).join('');
   const mismatchHtml = mismatches.slice(0, 3).map((item) => `
     <div style="padding:6px 0; border-top:1px solid rgba(255,255,255,0.08);">
       <div style="color:#ffcc88; font-size:0.78rem;">도전 후보: ${item.canonOfficialName}</div>
       <div style="color:#b79a75; font-size:0.68rem;">${item.reasons.join(', ')}</div>
     </div>
   `).join('');
+
+  // 재논의 큐(disputes)는 acceptThreshold 는 돌파하지 못했지만 rejectThreshold 이상을
+  // 넓은 도전/보완 논문이 펩꿰으로 가는 큐다. 별도 섹션으로 그려 플레이어가
+  // "재투고" 수준의 시그널을 받을 수 있도록 한다.
+  const disputesSection = disputesHtml
+    ? `
+      <div style="margin-top:10px;">
+        <div style="color:#ffcc88; font-size:0.74rem; font-family:var(--font-data, monospace);">재논의 큐</div>
+        ${disputesHtml}
+      </div>
+    `
+    : '';
 
   return `
     <div style="margin-top:10px;">
@@ -851,6 +877,7 @@ function renderPaperHistory(accepted, rejected, mismatches) {
       ${rejectedHtml}
       ${mismatchHtml}
     </div>
+    ${disputesSection}
   `;
 }
 
@@ -862,19 +889,36 @@ function renderReviewedCard(paper, kind) {
   const societyName = review.society?.name || '';
   const reasons = review.reasons || [];
   const accepted = kind === 'accepted';
-  const titleColor = accepted ? '#a8ffd1' : '#ffb6b6';
-  const subColor = accepted ? '#7aa18b' : '#b68c8c';
-  const labelText = accepted ? '수락' : '반려';
+  const disputed = kind === 'disputed';
+  const titleColor = accepted ? '#a8ffd1' : disputed ? '#ffd58a' : '#ffb6b6';
+  const subColor = accepted ? '#7aa18b' : disputed ? '#b79a6f' : '#b68c8c';
+  const labelText = accepted ? '수락' : disputed ? '재논의' : '반려';
+
+  const badgeBg = accepted
+    ? 'rgba(80, 180, 130, 0.18)'
+    : disputed
+      ? 'rgba(255, 170, 60, 0.18)'
+      : 'rgba(220, 110, 110, 0.18)';
+  const badgeBorder = accepted
+    ? 'rgba(80, 180, 130, 0.4)'
+    : disputed
+      ? 'rgba(255, 170, 60, 0.4)'
+      : 'rgba(220, 110, 110, 0.4)';
+  const badgeColor = accepted
+    ? '#b8ffd9'
+    : disputed
+      ? '#ffd58a'
+      : '#ffd0d0';
 
   const scoreBadge = score !== null
     ? `<span style="
-        background: ${accepted ? 'rgba(80, 180, 130, 0.18)' : 'rgba(220, 110, 110, 0.18)'};
-        border: 1px solid ${accepted ? 'rgba(80, 180, 130, 0.4)' : 'rgba(220, 110, 110, 0.4)'};
+        background: ${badgeBg};
+        border: 1px solid ${badgeBorder};
         border-radius: 4px;
         padding: 1px 6px;
         font-size: 0.66rem;
         font-family: var(--font-data, monospace);
-        color: ${accepted ? '#b8ffd9' : '#ffd0d0'};
+        color: ${badgeColor};
         margin-left: 6px;
       ">${score}/100</span>`
     : '';
@@ -888,7 +932,7 @@ function renderReviewedCard(paper, kind) {
         font-size: 0.66rem;
         color: #ffd58a;
         margin-left: 6px;
-      ">정설 검증 -30%</span>`
+      ">정설 검증 -${DISPUTED_CANON_PENALTY_PERCENT}%</span>`
     : '';
 
   const overrideHtml = review.canonOverride
@@ -995,7 +1039,7 @@ function renderClassificationBadge(classification) {
       border-radius: 4px;
       color: #ffd58a;
       font-size: 0.7rem;
-    ">정설 검증 후보 — ${escapeHtml(canonTitle)} (new_discovery 시 점수·보상 30% 차감)</div>
+    ">정설 검증 후보 — ${escapeHtml(canonTitle)} (new_discovery 시 점수·보상 ${DISPUTED_CANON_PENALTY_PERCENT}% 차감)</div>
   `;
 }
 
@@ -1563,7 +1607,7 @@ function handlePaperSubmitted() {
 
 function handlePaperAccepted({ paper, review }) {
   const score = typeof review?.score === 'number' ? ` (${review.score}점)` : '';
-  const penalty = review?.canonPenaltyApplied ? ' — 정설 검증 -30%' : '';
+  const penalty = review?.canonPenaltyApplied ? ` — 정설 검증 -${DISPUTED_CANON_PENALTY_PERCENT}%` : '';
   showToast(`논문 수락: "${paper.title}"${score}${penalty}`, 'paper', 4500);
   refreshResourceHUD();
   updatePaperBadge();
@@ -1572,6 +1616,17 @@ function handlePaperAccepted({ paper, review }) {
 function handlePaperRejected({ paper, review }) {
   const score = typeof review?.score === 'number' ? `[${review.score}점] ` : '';
   showToast(`논문 반려: ${score}${(review.reasons || ['심사 기준 미달']).join(' / ')}`, 'warn', 4500);
+  updatePaperBadge();
+}
+
+// PR-G: disputed 결과는 paper:rejected 와 구분되어 papers.disputes 큐에 쌓이지만
+// 이전에는 UI에 전혀 노출되지 않아 플레이어가 결과를 알 방법이 없었다.
+// 토스트 + 논문 패널 refresh 로 최소한 시그널을 주며, renderPaperHistory 에서
+// "재논의 큐" 섹션을 그려 이력에도 남긴다.
+function handlePaperDisputed({ paper, review }) {
+  const score = typeof review?.score === 'number' ? `[${review.score}점] ` : '';
+  const society = review?.society?.name || '';
+  showToast(`논문 재논의 큐: ${score}${society ? `${society} — ` : ''}"${paper?.title || '제목 없음'}"`, 'warn', 4500);
   updatePaperBadge();
 }
 
