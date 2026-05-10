@@ -24,7 +24,7 @@ const { startExpedition } = await import('../expedition.js');
 const { advanceDay, enqueueEvent, getPendingEvents, consumeTime } = await import('../schedule.js');
 const { on: onBus, off: offBus } = await import('../eventBus.js');
 const { checkPhaseProgress, takeMidtermExam, takeFinalExam } = await import('../phase.js');
-const { getCanonEntries, classifyDiscoveryAgainstCanon, getCanonMatchForSignature, inspectCanonMismatch } = await import('../academicCanon.js');
+const { getCanonEntries, classifyDiscoveryAgainstCanon, getCanonMatchForSignature, inspectCanonMismatch, registerCanon, REGISTER_CANON_REWARDS } = await import('../academicCanon.js');
 const { reviewPaper, getEligiblePaperPlans } = await import('../paperSystem.js');
 const { ACTION_COSTS, consumeForAction } = await import('../actionCosts.js');
 const { analyzeConnectorLines } = await import('../connectorLine.js');
@@ -1301,6 +1301,129 @@ const tests = [
     assert.equal(match.canonId, 'canon_001');
     // 관측값이 정설과 정확히 일치 (dynamics='갇힘(침묵)', instability~=35) → 'consistent' 으로 기록
     assert.equal(match.observed, 'consistent');
+  }],
+
+  ['registerCanon hard-rejects when canRegisterCanon flag is off (M9 PR-I)', () => {
+    resetAll();
+    gameState.progression.canRegisterCanon = false;
+    gameState.papers.accepted.unshift({
+      id: 'paper_test_phase_gate',
+      type: 'challenge',
+      title: '서리 결정 정설 반박',
+      review: { canonOverride: { canonId: 'canon_004', canonTitle: '서리 결정 정설' } },
+    });
+    const result = registerCanon('paper_test_phase_gate');
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /Phase 5/);
+  }],
+
+  ['registerCanon rejects new_discovery papers (M9 PR-I)', () => {
+    resetAll();
+    gameState.progression.canRegisterCanon = true;
+    gameState.papers.accepted.unshift({
+      id: 'paper_test_wrong_type',
+      type: 'new_discovery',
+      title: '신규 현상 보고',
+      review: { canonOverride: { canonId: 'canon_004', canonTitle: '서리 결정 정설' } },
+    });
+    const result = registerCanon('paper_test_wrong_type');
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /도전·보완/);
+  }],
+
+  ['registerCanon rejects when paper has no canonOverride (M9 PR-I)', () => {
+    resetAll();
+    gameState.progression.canRegisterCanon = true;
+    gameState.papers.accepted.unshift({
+      id: 'paper_test_no_override',
+      type: 'challenge',
+      title: '갱신 대상 없는 도전',
+      review: { /* canonOverride absent */ },
+    });
+    const result = registerCanon('paper_test_no_override');
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /갱신 대상/);
+  }],
+
+  ['registerCanon grants rewards / writes registered slot / fires event / consumes 5 days (M9 PR-I)', () => {
+    resetAll();
+    gameState.progression.canRegisterCanon = true;
+    const baselineDegree = gameState.resources.degreeScore;
+    const baselineRep = gameState.resources.reputation;
+    const baselineFunds = gameState.resources.researchFunds;
+    const baselineWeek = gameState.progression.currentWeek;
+    const baselineDay = gameState.progression.currentDay;
+
+    gameState.academic.canonOverrides['canon_004'] = {
+      canonId: 'canon_004',
+      canonTitle: '서리 결정 정설',
+      overriddenBy: 'paper_test_full',
+      overriddenByTitle: '서리 결정 정설 반박',
+      score: 85,
+    };
+    gameState.papers.accepted.unshift({
+      id: 'paper_test_full',
+      type: 'challenge',
+      title: '서리 결정 정설 반박',
+      authorName: '플레이어',
+      review: {
+        canonOverride: gameState.academic.canonOverrides['canon_004'],
+      },
+    });
+
+    let firedEvent = null;
+    const handler = (e) => { firedEvent = e; };
+    onBus('canon:registered', handler);
+
+    const result = registerCanon('paper_test_full');
+    assert.equal(result.ok, true);
+    assert.equal(result.rewards.degreeScore, REGISTER_CANON_REWARDS.degreeScore);
+    assert.equal(result.timeConsumed, ACTION_COSTS.registerCanon);
+
+    // resources increased
+    assert.equal(gameState.resources.degreeScore, baselineDegree + REGISTER_CANON_REWARDS.degreeScore);
+    assert.equal(gameState.resources.reputation, baselineRep + REGISTER_CANON_REWARDS.reputation);
+    assert.equal(gameState.resources.researchFunds, baselineFunds + REGISTER_CANON_REWARDS.researchFunds);
+
+    // override slot enriched
+    const slot = gameState.academic.canonOverrides['canon_004'];
+    assert.equal(slot.registered, true);
+    assert.equal(slot.registeredByPaper, 'paper_test_full');
+    assert.equal(slot.newOfficialName, '서리 결정 정설 반박');
+
+    // event fired
+    assert.ok(firedEvent, 'canon:registered event must fire');
+    assert.equal(firedEvent.canonId, 'canon_004');
+
+    // schedule advanced by 5 days (registerCanon cost)
+    const dayDelta = (gameState.progression.currentWeek - baselineWeek) * 7 + (gameState.progression.currentDay - baselineDay);
+    assert.equal(dayDelta, ACTION_COSTS.registerCanon, `expected ${ACTION_COSTS.registerCanon}d advance, got ${dayDelta}`);
+
+    offBus('canon:registered', handler);
+  }],
+
+  ['registerCanon is idempotent — second call rejects with already-registered reason (M9 PR-I)', () => {
+    resetAll();
+    gameState.progression.canRegisterCanon = true;
+    gameState.academic.canonOverrides['canon_005'] = {
+      canonId: 'canon_005',
+      canonTitle: '심연 종소리 정설',
+      overriddenBy: 'paper_test_idem',
+      overriddenByTitle: '심연 종소리 반박',
+      score: 78,
+    };
+    gameState.papers.accepted.unshift({
+      id: 'paper_test_idem',
+      type: 'challenge',
+      title: '심연 종소리 반박',
+      review: { canonOverride: gameState.academic.canonOverrides['canon_005'] },
+    });
+
+    const first = registerCanon('paper_test_idem');
+    assert.equal(first.ok, true);
+    const second = registerCanon('paper_test_idem');
+    assert.equal(second.ok, false);
+    assert.match(second.reason, /이미 등재/);
   }],
 ];
 
