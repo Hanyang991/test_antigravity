@@ -43,6 +43,9 @@ export function initInbox() {
   on('economy:contractSigned', (payload) => addFromEvent('economy:contractSigned', payload));
   on('expedition:completed', (payload) => addFromEvent('expedition:completed', payload));
   on('canon:mismatch', (payload) => addFromEvent('canon:mismatch', payload));
+  // PR-J: 학회지 NPC 논문 게재/반박 알림.
+  on('publication:released', (payload) => addFromEvent('publication:released', payload));
+  on('publication:rebutted', (payload) => addFromEvent('publication:rebutted', payload));
 }
 
 function addFromEvent(kind, payload) {
