@@ -26,7 +26,12 @@ import { applyForGrant, getGrantOffers, getContractOffers, sellScroll, signContr
 import { advanceDay } from './schedule.js';
 import { getCurrentPhaseInfo } from './phase.js';
 import { getMessages, getUnreadCount, markRead } from './inboxSystem.js';
-import { getJournalPapers, getCanonForPaper } from './journalSystem.js';
+import {
+  getJournalPapers,
+  getCanonForPaper,
+  getActiveJournalPapers,
+  submitJournalRebuttal,
+} from './journalSystem.js';
 import { SENDER_ROLES } from './data/inboxSeed.js';
 import { resetState } from './gameState.js';
 import { clearSave, saveGame } from './saveLoad.js';
@@ -72,10 +77,13 @@ export function initLabNotebook() {
   on('exam:finalTaken', handleFinalTaken);
   on('inbox:received', handleInboxChange);
   on('inbox:read', handleInboxChange);
+  on('journal:released', handleJournalChange);
+  on('journal:rebutted', handleJournalChange);
 
   updateNotebookBadge();
   updatePaperBadge();
   refreshInboxBadge();
+  updateJournalBadge();
 }
 
 // ── 토스트 시스템 ─────────────────────────────────────────────────
@@ -1153,7 +1161,7 @@ function createResourceHUD() {
       <button class="scene-btn active" type="button" data-scene="lab">🜂 연구실</button>
       <button class="scene-btn" type="button" data-scene="expedition">🧭 답사</button>
       <button class="scene-btn" type="button" data-scene="inbox">📬 메일<span class="scene-btn-badge" id="scene-inbox-badge" hidden>0</span></button>
-      <button class="scene-btn" type="button" data-scene="journal">📰 학계</button>
+      <button class="scene-btn" type="button" data-scene="journal">📰 학계<span class="scene-btn-badge" id="scene-journal-badge" hidden>0</span></button>
       <button class="scene-btn" type="button" data-scene="settings">⚙ 환경설정</button>
     </nav>
     <span class="hud-divider" aria-hidden="true"></span>
@@ -1347,7 +1355,10 @@ function setActiveScene(name) {
 
   if (name === 'expedition') refreshExpeditionList();
   if (name === 'inbox') refreshInbox();
-  if (name === 'journal') refreshJournal();
+  if (name === 'journal') {
+    refreshJournal();
+    updateJournalBadge();
+  }
   if (name === 'settings') refreshSettings();
 }
 
@@ -1508,19 +1519,26 @@ function handleInboxChange() {
 }
 
 // ── 학계 저널 ──────────────────────────────────────────────────────
+// 모든 정설 논문은 반박 가능하다. 5일을 소모하고 즉시 결과 처리:
+//   truthful=true  논문을 반박 → 오반박(학위 -10 / 평판 -8)
+//   truthful=false 논문을 반박 → 정확한 반박(학위 +30 / 평판 +18 / 자금 +1000G)
 function refreshJournal() {
   const grid = document.getElementById('journal-grid');
   if (!grid) return;
 
-  const papers = getJournalPapers();
-  grid.innerHTML = papers.map((p) => {
-    const canon = getCanonForPaper(p);
-    const challengeable = !!(p.challengeable && canon?.challengeable);
-    const cta = challengeable
-      ? `<button class="journal-cta" type="button" data-paper-id="${p.id}">반박 초안 작성</button>`
-      : `<span class="journal-cta journal-cta-disabled" title="${canon ? '현 정설은 반박 대상으로 분류되지 않습니다.' : '관련 정설이 없는 일반 논문입니다.'}">열람만 가능</span>`;
-    return `
-      <article class="journal-card">
+  const items = getActiveJournalPapers();
+  const failed = gameState.academic?.failedRebuttals || 0;
+  const succeeded = gameState.academic?.successfulRebuttals || 0;
+  const counterHtml = (failed > 0 || succeeded > 0)
+    ? `<div class="journal-rebut-counter">반박 누적: 정확 ${succeeded} / 오반박 ${failed}</div>`
+    : '';
+
+  const cardsHtml = items.length === 0
+    ? `<div class="journal-empty">현재 열람 가능한 정설 논문이 없습니다. 학기가 진행되며 신간이 게재됩니다.</div>`
+    : items.map(({ template: p }) => {
+        const canon = getCanonForPaper(p);
+        return `
+      <article class="journal-card" data-paper-id="${escapeHtml(p.id)}">
         <div class="journal-card-meta">
           <span class="journal-card-society">${escapeHtml(p.society)}</span>
           <span class="journal-card-year">${p.year}년 · 인용 ${p.citations}</span>
@@ -1530,27 +1548,65 @@ function refreshJournal() {
         <p class="journal-card-abstract">${escapeHtml(p.abstract)}</p>
         <div class="journal-card-conclusion"><strong>결론</strong> · ${escapeHtml(p.conclusion)}</div>
         ${canon ? `<div class="journal-card-canon">정설: ${escapeHtml(canon.title)}</div>` : ''}
-        <div class="journal-card-actions">${cta}</div>
+        <div class="journal-card-actions">
+          <button class="journal-rebut" type="button" data-paper-id="${escapeHtml(p.id)}"
+            title="반박 (5일 소모 · 사실에 부합하는 정설 논문이면 학위·평판 손실)">반박 (5일)</button>
+        </div>
       </article>
     `;
-  }).join('');
+      }).join('');
 
-  grid.querySelectorAll('.journal-cta:not(.journal-cta-disabled)').forEach((btn) => {
+  grid.innerHTML = `${counterHtml}${cardsHtml}`;
+
+  grid.querySelectorAll('.journal-rebut').forEach((btn) => {
     btn.addEventListener('click', () => {
-      handleRebuttalRequest(btn.dataset.paperId);
+      handleJournalRebutClick(btn.dataset.paperId);
     });
   });
 }
 
-function handleRebuttalRequest(paperId) {
-  const paper = getJournalPapers().find((p) => p.id === paperId);
-  if (!paper) return;
-  const canon = getCanonForPaper(paper);
-  setActiveScene('lab');
-  showToast(
-    `반박 대상: ${canon ? canon.title : paper.title} — 관측을 재현해 도전 논문 요건을 채우세요.`,
-    'mismatch'
-  );
+function handleJournalRebutClick(paperId) {
+  if (!paperId) return;
+  const result = submitJournalRebuttal(paperId);
+  if (!result.ok) {
+    showToast(result.reason || '반박 실패', 'warning');
+    return;
+  }
+  const { outcome, deltas, paper } = result;
+  if (outcome === 'wrongful') {
+    showToast(
+      `오반박: "${paper.targetJournalPaperTitle}" 는 사실에 부합하는 정설이었습니다. 학위 ${deltas.degreeScore}, 평판 ${deltas.reputation}.`,
+      'mismatch', 5000,
+    );
+  } else {
+    showToast(
+      `반박 채택: "${paper.targetJournalPaperTitle}" 의 결론을 학계가 철회합니다. 학위 +${deltas.degreeScore}, 평판 +${deltas.reputation}.`,
+      'paper', 5000,
+    );
+  }
+  refreshJournal();
+  updateJournalBadge();
+  updatePaperBadge();
+  refreshResourceHUD();
+}
+
+function updateJournalBadge() {
+  const badge = document.getElementById('scene-journal-badge');
+  if (!badge) return;
+  const count = getActiveJournalPapers().length;
+  if (count > 0) {
+    badge.hidden = false;
+    badge.textContent = count > 99 ? '99+' : String(count);
+  } else {
+    badge.hidden = true;
+  }
+}
+
+function handleJournalChange() {
+  updateJournalBadge();
+  if (document.body.dataset.scene === 'journal') {
+    refreshJournal();
+  }
 }
 
 function escapeHtml(str) {
