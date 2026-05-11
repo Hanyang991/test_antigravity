@@ -72,9 +72,12 @@ export function initLabNotebook() {
   on('exam:finalTaken', handleFinalTaken);
   on('inbox:received', handleInboxChange);
   on('inbox:read', handleInboxChange);
+  on('publication:released', handlePublicationChange);
+  on('publication:rebutted', handlePublicationChange);
 
   updateNotebookBadge();
   updatePaperBadge();
+  updateSocietyBadge();
   refreshInboxBadge();
 }
 
@@ -442,9 +445,8 @@ function refreshPaperList() {
   const accepted = gameState.papers.accepted;
   const rejected = gameState.papers.rejected;
   const disputes = Array.isArray(gameState.papers.disputes) ? gameState.papers.disputes : [];
-  const publications = getActivePublications();
 
-  if (eligible.length === 0 && accepted.length === 0 && rejected.length === 0 && disputes.length === 0 && publications.length === 0) {
+  if (eligible.length === 0 && accepted.length === 0 && rejected.length === 0 && disputes.length === 0) {
     list.innerHTML = `
       <p style="color: #666; font-size: 0.8rem; text-align: center; padding: 20px 0;">
         아직 제출 가능한 논문이 없습니다.<br>현상을 3회 이상 재현해 보세요.
@@ -481,10 +483,8 @@ function refreshPaperList() {
   }).join('');
 
   const resultHtml = renderPaperHistory(accepted, rejected, disputes, mismatches);
-  const publicationsHtml = renderPublicationsSection(publications);
 
   list.innerHTML = `
-    ${publicationsHtml}
     ${eligibleHtml || ''}
     ${resultHtml}
   `;
@@ -506,76 +506,142 @@ function refreshPaperList() {
   list.querySelectorAll('.paper-register-canon').forEach((button) => {
     button.addEventListener('click', () => handleRegisterCanonClick(button.dataset.paperId));
   });
+}
 
-  // PR-J: 학회지 NPC 논문에 대한 반박 버튼.
+// PR-A (학계 씬 학회지 섹션): 학회별 accordion. 각 섹션 = 학회 헤더 + (접고 펴침 가능한) NPC 논문 카드 리스트.
+// 활성 publication 이 있는 학회는 자동으로 펼쳐진 상태, 나머지는 접힌 상태로 렌더한다.
+function refreshSocietyList() {
+  const list = document.getElementById('scene-journal-society-list');
+  if (!list) return;
+
+  const societies = getSocieties();
+  const publications = getActivePublications();
+  const failed = gameState.academic?.failedRebuttals || 0;
+  const succeeded = gameState.academic?.successfulRebuttals || 0;
+
+  // 기존 expanded 상태 보존 — refresh 시 사용자가 접어둔 학회가 다시 열리지 않도록.
+  const previouslyOpen = new Set();
+  list.querySelectorAll('.society-section[data-open="1"]').forEach((el) => {
+    if (el.dataset.societyId) previouslyOpen.add(el.dataset.societyId);
+  });
+
+  const counterHtml = (failed > 0 || succeeded > 0)
+    ? `<div style="color:#7ebadf; font-size:0.68rem; margin-bottom:6px;">반박 누적: 정확 ${succeeded} / 오반박 ${failed}</div>`
+    : '';
+
+  const sections = societies.map((society) => {
+    const items = publications.filter(({ template }) => template.society === society.id);
+    // 첫 진입 시: 활성 publication 이 있는 학회만 자동 펼침. 이미 이전에 펼쳤던 상태는 유지.
+    const wasOpen = previouslyOpen.size > 0
+      ? previouslyOpen.has(society.id)
+      : items.length > 0;
+    return renderSocietySection(society, items, wasOpen);
+  }).join('');
+
+  list.innerHTML = `
+    ${counterHtml}
+    ${sections}
+  `;
+
+  // accordion 토글.
+  list.querySelectorAll('.society-section-header').forEach((header) => {
+    header.addEventListener('click', () => toggleSocietySection(header));
+  });
   list.querySelectorAll('.publication-rebut').forEach((button) => {
-    button.addEventListener('click', () => handleRebutPublicationClick(button.dataset.publicationId));
+    button.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleRebutPublicationClick(button.dataset.publicationId);
+    });
   });
 }
 
-// PR-J: 활성 NPC 학회지 논문 섹션. 각 카드 = abstract + 반박 버튼.
-function renderPublicationsSection(publications) {
-  const failed = gameState.academic?.failedRebuttals || 0;
-  const succeeded = gameState.academic?.successfulRebuttals || 0;
-  const counterHtml = (failed > 0 || succeeded > 0)
-    ? `<div style="color:#7ebadf; font-size:0.66rem; margin-top:2px;">반박 누적: 정확 ${succeeded} / 오반박 ${failed}</div>`
-    : '';
-
-  if (publications.length === 0) {
-    return `
-      <div style="margin-bottom:10px;">
-        <div style="color:#8fd4ff; font-size:0.74rem; font-family:var(--font-data, monospace);">학회지 NPC 논문</div>
-        ${counterHtml}
-        <div style="color:#666; font-size:0.72rem; padding:6px 0;">현재 출간된 NPC 논문이 없습니다.</div>
-      </div>
-    `;
-  }
-
-  const cards = publications.map(({ template, entry }) => {
-    const releasedWeek = entry?.releasedAt?.week ?? template.releaseWeek;
-    return `
-      <div class="publication-card" style="
-        background: rgba(20, 30, 50, 0.78);
-        border: 1px solid rgba(120, 180, 230, 0.3);
-        border-radius: 6px;
-        padding: 8px 10px;
-        margin-bottom: 8px;
-      ">
-        <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
-          <span style="color:#cfe2ff; font-size:0.82rem; font-weight:600;">${escapeHtml(template.title)}</span>
-          <span style="color:#7ebadf; font-size:0.66rem;">${releasedWeek}주차</span>
-        </div>
-        <div style="color:#9bb6cf; font-size:0.7rem; margin-top:2px;">
-          ${escapeHtml(template.author)} · ${escapeHtml(getSocietyDisplayName(template.society))}
-        </div>
-        <div style="color:#b9d4ec; font-size:0.7rem; margin-top:4px; line-height:1.4;">
-          ${escapeHtml(template.abstract)}
-        </div>
-        <div style="display:flex; justify-content:flex-end; margin-top:6px;">
-          <button class="publication-rebut" data-publication-id="${escapeHtml(template.id)}"
-            title="반박 (5일 소모 · 사실에 부합하는 논문이면 학위·평판 손실)"
-            style="
-              background: rgba(220, 110, 110, 0.14);
-              border: 1px solid rgba(220, 110, 110, 0.45);
-              border-radius: 4px;
-              color: #ffd0d0;
-              font-size: 0.7rem;
-              padding: 4px 10px;
-              cursor: pointer;
-              font-family: var(--font-text, system-ui), sans-serif;
-            ">반박 (5일)</button>
-        </div>
-      </div>
-    `;
-  }).join('');
-
+function renderSocietySection(society, items, isOpen) {
+  const count = items.length;
+  const indicator = isOpen ? '▾' : '▸';
+  const bodyDisplay = isOpen ? 'block' : 'none';
+  const cards = count === 0
+    ? `<div style="color:#666; font-size:0.72rem; padding:6px 4px;">현재 이 학회에 출간된 NPC 논문이 없습니다.</div>`
+    : items.map(renderPublicationCard).join('');
   return `
-    <div style="margin-bottom:10px;">
-      <div style="color:#8fd4ff; font-size:0.74rem; font-family:var(--font-data, monospace);">학회지 NPC 논문 (${publications.length})</div>
-      ${counterHtml}
-      ${cards}
+    <div class="society-section" data-society-id="${escapeHtml(society.id)}" data-open="${isOpen ? '1' : '0'}" style="
+      margin-bottom: 8px;
+      border: 1px solid rgba(120, 180, 230, 0.22);
+      border-radius: 6px;
+      background: rgba(10, 18, 32, 0.55);
+    ">
+      <button class="society-section-header" type="button" style="
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: transparent;
+        border: none;
+        color: #cfe2ff;
+        font-family: var(--font-data, 'Share Tech Mono', monospace);
+        font-size: 0.78rem;
+        padding: 8px 10px;
+        cursor: pointer;
+        text-align: left;
+      ">
+        <span><span class="society-section-toggle" style="display:inline-block; width:14px; color:#8fd4ff;">${indicator}</span>${escapeHtml(society.name)}</span>
+        <span style="color:#7ebadf; font-size:0.7rem;">활성 ${count}</span>
+      </button>
+      <div class="society-section-body" style="display:${bodyDisplay}; padding: 4px 10px 10px 10px;">
+        ${cards}
+      </div>
     </div>
   `;
+}
+
+function renderPublicationCard({ template, entry }) {
+  const releasedWeek = entry?.releasedAt?.week ?? template.releaseWeek;
+  return `
+    <div class="publication-card" data-publication-id="${escapeHtml(template.id)}" style="
+      background: rgba(20, 30, 50, 0.78);
+      border: 1px solid rgba(120, 180, 230, 0.3);
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-bottom: 8px;
+    ">
+      <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
+        <span style="color:#cfe2ff; font-size:0.82rem; font-weight:600;">${escapeHtml(template.title)}</span>
+        <span style="color:#7ebadf; font-size:0.66rem;">${releasedWeek}주차</span>
+      </div>
+      <div style="color:#9bb6cf; font-size:0.7rem; margin-top:2px;">
+        ${escapeHtml(template.author)}
+      </div>
+      <div style="color:#b9d4ec; font-size:0.7rem; margin-top:4px; line-height:1.4;">
+        ${escapeHtml(template.abstract)}
+      </div>
+      <div style="display:flex; justify-content:flex-end; margin-top:6px;">
+        <button class="publication-rebut" data-publication-id="${escapeHtml(template.id)}"
+          title="반박 (5일 소모 · 사실에 부합하는 논문이면 학위·평판 손실)"
+          style="
+            background: rgba(220, 110, 110, 0.14);
+            border: 1px solid rgba(220, 110, 110, 0.45);
+            border-radius: 4px;
+            color: #ffd0d0;
+            font-size: 0.7rem;
+            padding: 4px 10px;
+            cursor: pointer;
+            font-family: var(--font-text, system-ui), sans-serif;
+          ">반박 (5일)</button>
+      </div>
+    </div>
+  `;
+}
+
+function toggleSocietySection(headerEl) {
+  const section = headerEl.closest('.society-section');
+  if (!section) return;
+  const body = section.querySelector('.society-section-body');
+  if (!body) return;
+  const isOpen = section.dataset.open === '1';
+  const next = !isOpen;
+  section.dataset.open = next ? '1' : '0';
+  body.style.display = next ? 'block' : 'none';
+  const toggle = headerEl.querySelector('.society-section-toggle');
+  if (toggle) toggle.textContent = next ? '▾' : '▸';
 }
 
 function getSocietyDisplayName(societyId) {
@@ -595,7 +661,9 @@ function handleRebutPublicationClick(publicationId) {
   } else {
     showToast(`반박 채택 — 학위 +${result.deltas.degreeScore} / 평판 +${result.deltas.reputation} / ${result.deltas.researchFunds}G`, 'paper', 5000);
   }
+  refreshSocietyList();
   refreshPaperList();
+  updateSocietyBadge();
   refreshResourceHUD();
 }
 
@@ -1153,7 +1221,7 @@ function createResourceHUD() {
       <button class="scene-btn active" type="button" data-scene="lab">🜂 연구실</button>
       <button class="scene-btn" type="button" data-scene="expedition">🧭 답사</button>
       <button class="scene-btn" type="button" data-scene="inbox">📬 메일<span class="scene-btn-badge" id="scene-inbox-badge" hidden>0</span></button>
-      <button class="scene-btn" type="button" data-scene="journal">📰 학계</button>
+      <button class="scene-btn" type="button" data-scene="journal">📰 학계<span class="scene-btn-badge" id="scene-journal-badge" hidden>0</span></button>
       <button class="scene-btn" type="button" data-scene="settings">⚙ 환경설정</button>
     </nav>
     <span class="hud-divider" aria-hidden="true"></span>
@@ -1312,7 +1380,14 @@ function setupScenes() {
         <h1>학계 저널</h1>
         <p>다른 학파·연구실이 발표한 논문을 열람합니다. 정설과 충돌하는 관측이 있다면 도전 논문 작성을 검토하세요.</p>
       </header>
-      <div class="journal-grid" id="journal-grid"></div>
+      <section class="journal-section">
+        <h2 class="journal-section-title">정설 논문</h2>
+        <div class="journal-grid" id="journal-grid"></div>
+      </section>
+      <section class="journal-section">
+        <h2 class="journal-section-title">학회지 — NPC 논문</h2>
+        <div id="scene-journal-society-list" class="journal-society-list"></div>
+      </section>
     </div>
   `;
   document.body.appendChild(journalScene);
@@ -1347,7 +1422,10 @@ function setActiveScene(name) {
 
   if (name === 'expedition') refreshExpeditionList();
   if (name === 'inbox') refreshInbox();
-  if (name === 'journal') refreshJournal();
+  if (name === 'journal') {
+    refreshJournal();
+    refreshSocietyList();
+  }
   if (name === 'settings') refreshSettings();
 }
 
@@ -1707,6 +1785,25 @@ function updatePaperBadge() {
   if (panel && panel.style.display !== 'none') {
     refreshPaperList();
   }
+}
+
+// PR-A: 학계(journal) 씬 배지 — 아직 반박되지 않은 활성 NPC 논문 수.
+function updateSocietyBadge() {
+  const badge = document.getElementById('scene-journal-badge');
+  if (!badge) return;
+  const count = getActivePublications().length;
+  badge.textContent = count;
+  if (count > 0) badge.removeAttribute('hidden');
+  else badge.setAttribute('hidden', '');
+
+  // 학계 씬이 활성화되어 있으면 즉시 반영.
+  if (document.body.dataset.scene === 'journal') {
+    refreshSocietyList();
+  }
+}
+
+function handlePublicationChange() {
+  updateSocietyBadge();
 }
 
 function renderPhaseRequirement(requirements) {
