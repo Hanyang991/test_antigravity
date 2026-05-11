@@ -610,6 +610,40 @@ body {
   cursor: default;
 }
 
+.journal-rebut {
+  background: rgba(139, 0, 0, 0.85);
+  border: 1px solid rgba(139, 0, 0, 0.95);
+  color: #fff8ec;
+  font-family: inherit;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 3px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.journal-rebut:hover {
+  background: rgba(170, 30, 30, 0.95);
+}
+
+.journal-rebut-counter {
+  grid-column: 1 / -1;
+  color: #6b5e4a;
+  font-size: 0.78rem;
+  padding: 4px 6px 8px;
+  font-family: var(--font-data, 'Share Tech Mono', monospace);
+}
+
+.journal-empty {
+  grid-column: 1 / -1;
+  color: #6b5e4a;
+  font-size: 0.86rem;
+  padding: 20px 8px;
+  text-align: center;
+  font-style: italic;
+}
+
 @media (max-width: 720px) {
   .inbox-layout {
     grid-template-columns: 1fr;

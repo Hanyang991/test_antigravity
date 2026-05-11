@@ -11,6 +11,7 @@ import { initAcademicCanon } from './academicCanon.js'
 import { renderAcademicUI } from './academicUI.js'
 import { initInbox } from './inboxSystem.js'
 import { initSocietyPublications } from './societyPublications.js'
+import { initJournal } from './journalSystem.js'
 import { initPaperSystem } from './paperSystem.js'
 import { playCast, playDrawStart, playRiftControl, playStrokeCommit, primeAudio } from './sound.js'
 import { formatCanvasStatus, formatCastInjection } from './magicStatusUi.js'
@@ -400,6 +401,7 @@ function init() {
   initAcademicCanon();
   initInbox();
   initSocietyPublications();
+  initJournal();
   initPaperSystem();
   initLabNotebook();
   renderAcademicUI(gameState, lastAnalysis);
